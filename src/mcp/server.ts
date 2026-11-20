@@ -22,7 +22,7 @@ import type { Generate } from "../server/summary";
 import { wakePattern, type Assistant } from "../server/tasks";
 import { cliSessions, pickRunner } from "./runner";
 
-const VERSION = "1.2.0";
+const VERSION = "1.2.1";
 // stdout carries the protocol only; anything else a dependency prints goes to stderr.
 console.log = console.info = (...args: unknown[]) => console.error(...args);
 const env = process.env;

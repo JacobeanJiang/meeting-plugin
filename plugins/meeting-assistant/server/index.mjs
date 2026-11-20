@@ -2878,7 +2878,7 @@ function cliSessions(runner2, cwd, spawnFn = spawn2) {
 }
 
 // src/mcp/server.ts
-var VERSION = "1.2.0";
+var VERSION = "1.2.1";
 console.log = console.info = (...args) => console.error(...args);
 var env = process.env;
 var home = path5.resolve(env.MEETING_ASSISTANT_HOME || path5.join(os4.homedir(), ".meeting-assistant"));

@@ -187,3 +187,7 @@ mkdir -p ~/.claude/skills && cp -R <dir>/skills/meeting-assistant ~/.claude/skil
 
 详见 [NOTICE.md](NOTICE.md)。
 
+## 许可证
+
+本项目代码以 [MIT](LICENSE) 许可证开源；随附的第三方组件保留各自的许可证。
+

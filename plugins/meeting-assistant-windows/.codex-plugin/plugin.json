@@ -1,6 +1,6 @@
 {
   "name": "meeting-assistant-windows",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Record meetings from the microphone with local transcription, a live self-organising board, Q&A about what was said, work handed to the agent during the meeting, and structured minutes. (Windows)",
   "author": {
     "name": "JacobeanJiang",
@@ -8,6 +8,7 @@
   },
   "homepage": "https://github.com/JacobeanJiang/meeting-plugin",
   "repository": "https://github.com/JacobeanJiang/meeting-plugin",
+  "license": "MIT",
   "keywords": [
     "meeting",
     "minutes",

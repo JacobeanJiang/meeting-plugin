@@ -25,7 +25,8 @@ for (const target of targets) {
   await mkdir(path.join(out, 'bin'), { recursive: true });
   await cp(path.join(root, 'scripts/start.sh'), path.join(out, 'bin/start.sh')); await chmod(path.join(out, 'bin/start.sh'), 0o755);
   await cp(path.join(root, 'assets'), path.join(out, 'assets'), { recursive: true });
-  const shared = { version: pkg.version, description: description + ' (' + target.os + ')', author: { name: 'JacobeanJiang', url: 'https://github.com/JacobeanJiang' }, homepage: repository, repository, keywords };
+  await cp(path.join(root, 'LICENSE'), path.join(out, 'LICENSE'));
+  const shared = { version: pkg.version, description: description + ' (' + target.os + ')', author: { name: 'JacobeanJiang', url: 'https://github.com/JacobeanJiang' }, homepage: repository, repository, license: 'MIT', keywords };
   await mkdir(path.join(out, '.codex-plugin'));
   await writeFile(path.join(out, '.codex-plugin/plugin.json'), JSON.stringify({ name: target.name, ...shared, mcpServers: './.mcp.json', skills: './skills/',
     interface: { displayName: target.label, shortDescription: 'Meetings: live transcription, board and minutes', longDescription: description, developerName: 'JacobeanJiang', category: 'Productivity', capabilities: ['Interactive', 'Read', 'Write'], websiteURL: repository,
