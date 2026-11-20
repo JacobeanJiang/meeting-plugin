@@ -8,7 +8,7 @@ import { asrChoicesFor, type AiTask, BOARD_FORMS, DEFAULT_SETTINGS, DEFAULT_TOPI
 import { RETRY_PROMPT, VAD, asrConfig, asrPrompt, polishTranscript } from "./asr";
 import * as OpenCC from "opencc-js";
 import { ModelStore, WINDOWS_DEFAULTS, type SetupState } from "./models";
-import { detectTasks, mentionsAssistant, taskMessage } from "./tasks";
+import { DEFAULT_ASSISTANT, detectTasks, mentionsAssistant, quickTasks, taskMessage, type Assistant } from "./tasks";
 import { generateMinutes } from "./minutes";
 import { minutesDocument, minutesMeta } from "../minutes-format";
 import { applyRound, itemsFromNotes, meaningfulLength, mergePlan, notesFromItems, summarize, type Generate } from "./summary";
@@ -38,7 +38,13 @@ export type Deps = {
   run?: (binary: string, args: string[], cwd?: string) => Promise<string>;
   record?: (dir: string, seconds: number, event: (value: Record<string, unknown>) => void, ended: (code: number | null) => void) => Recorder;
   /** Background conversations for work requested of AI 助手; absent when the host cannot start them. */
-  sessions?: { start: (workspaceId: string) => Promise<string>; send: (workspaceId: string, sessionId: string, message: string) => Promise<string>; status: (workspaceId: string, sessionId: string, turnId: string) => Promise<string>; workspace: () => Promise<string | null> };
+  sessions?: { start: (workspaceId: string) => Promise<string>; send: (workspaceId: string, sessionId: string, message: string) => Promise<string>; status: (workspaceId: string, sessionId: string, turnId: string) => Promise<string>; workspace: () => Promise<string | null>;
+    /** "output": the run's final answer is the result (agents run from the command line); "tool" (default): the run reports through submit_task_result. */
+    reply?: "tool" | "output"; output?: (turnId: string) => Promise<string | null> };
+  /** Who people address during the meeting to hand over work; defaults to AI 助手. */
+  assistant?: Assistant;
+  /** Without an organising model, take the speech naming the assistant as the task, worded as said. */
+  quickTasks?: boolean;
   /** Seconds between status checks of a running task (tests shorten it). */
   taskPollMs?: number;
   /** Chinese script conversion; defaults to the bundled recorder in text mode. */
@@ -103,6 +109,7 @@ export class MeetingController {
   private configFile = "";
   private configFor = "";
   private readonly models: NonNullable<Deps["models"]>;
+  private get assistant(): Assistant { return this.deps.assistant ?? DEFAULT_ASSISTANT; }
   constructor(private readonly deps: Deps) {
     this.models = deps.models ?? (this.platform === "win32" ? new ModelStore(path.join(deps.data, "models"), () => this.emit(), fetch, null, WINDOWS_DEFAULTS) : new ModelStore(path.join(deps.data, "models"), () => this.emit()));
   }
@@ -147,7 +154,7 @@ export class MeetingController {
         record.summaries ??= [];
         record.minutes ??= null; if (record.minutes?.state === "working") record.minutes = { ...record.minutes, state: "failed", error: "会议助手重启时纪要还没生成完，请重新生成" };
         record.chapters ??= null; record.nextMeetingId ??= null; record.aiTasks ??= []; record.aiSessionId ??= null; record.workspaceId ??= null;
-        for (const task of record.aiTasks) if (task.status === "running" || task.status === "queued") Object.assign(task, { status: "failed", error: "会议助手重启时任务还没完成，可以在会上重新请AI 助手做一次", finishedAt: task.finishedAt ?? Date.now() });
+        for (const task of record.aiTasks) if (task.status === "running" || task.status === "queued") Object.assign(task, { status: "failed", error: "服务重启时任务还没完成，可以在会上重新请" + this.assistant.name + "做一次", finishedAt: task.finishedAt ?? Date.now() });
         for (const item of record.items) item.sub ??= null;
         record.requestedForm = null; record.redraw = null; // a redraw interrupted by a restart is simply not resumed
         record.summaryError = null; // an organising failure from an earlier run is no longer actionable; the board it kept is still there
@@ -357,7 +364,7 @@ export class MeetingController {
     const out = file.replace(/\.wav$/i, ""), argsFile = out + ".args";
     const threads = Math.max(2, Math.min(8, os.cpus().length - 2));
     const args = ["-m", relative(model), "-f", relative(file), "-l", this.settings.language, "-t", String(threads), "-nt", "-np", "-otxt", "-of", relative(out)];
-    const prompt = asrPrompt(this.settings).replace(/[\r\n]+/g, " ");
+    const prompt = asrPrompt(this.settings, this.assistant.name).replace(/[\r\n]+/g, " ");
     if (prompt) args.push("--prompt", prompt);
     if (vad) args.push("--vad", "-vm", relative(vad), "-vt", String(VAD[this.settings.vad].threshold), "-vspd", String(VAD[this.settings.vad].minMs));
     await writeFile(argsFile, args.join("\n") + "\n", { mode: 0o600 });
@@ -418,7 +425,7 @@ export class MeetingController {
           if (text && this.settings.autoSummary && Date.now() - (record.summaryAt ?? 0) >= 40000) void this.doSummary(false).catch(() => undefined);
           // A request to AI 助手 may be split across two segments, so the previous one is checked together with this one.
           const seq = segment.seq; const before = record.segments.filter(s => s.status === "done" && s.seq < seq).at(-1);
-          if (text && this.settings.aiTasks && mentionsAssistant((before?.text ?? "") + text)) void this.findTasks(record).catch(() => undefined);
+          if (text && this.settings.aiTasks && mentionsAssistant((before?.text ?? "") + text, this.assistant)) void this.findTasks(record).catch(() => undefined);
         } catch { segment.status = "failed"; segment.error = "此段转写失败，音频已保留，可重试"; this.deps.log("segment_failed", { success: false }); }
         await this.persist(record); this.emit();
       }
@@ -487,7 +494,8 @@ export class MeetingController {
     if (this.detecting.has(record.id)) return;
     this.detecting.add(record.id);
     try {
-      const found = await detectTasks(this.publicMeeting(record), this.deps.generate, this.settings.model);
+      const found = await detectTasks(this.publicMeeting(record), this.deps.generate, this.settings.model, this.assistant)
+        .catch(error => this.deps.quickTasks ? quickTasks(this.publicMeeting(record), this.assistant) : Promise.reject(error));
       if (!found.length || this.disposed) return;
       record.aiTasks ??= [];
       for (const task of found) record.aiTasks.push({ id: "t" + (record.aiTasks.length + 1), ...task, status: "queued", createdAt: Date.now(), startedAt: null, finishedAt: null, result: null, error: null, turnId: null });
@@ -516,10 +524,10 @@ export class MeetingController {
     Object.assign(task, { status: "running", startedAt: Date.now(), error: null }); await this.persist(record); this.emit();
     try {
       const workspaceId = record.workspaceId ?? await sessions.workspace();
-      if (!workspaceId) return fail("没有可用的项目来执行任务，请先在AI 助手里打开一个项目");
+      if (!workspaceId) return fail("没有可用的项目来执行任务，请先在" + this.assistant.name + "里打开一个项目");
       record.workspaceId = workspaceId;
       record.aiSessionId ??= await sessions.start(workspaceId);
-      task.turnId = await sessions.send(workspaceId, record.aiSessionId, taskMessage(this.publicMeeting(record), task));
+      task.turnId = await sessions.send(workspaceId, record.aiSessionId, taskMessage(this.publicMeeting(record), task, sessions.reply ?? "tool"));
       await this.persist(record); this.emit();
       const poll = this.deps.taskPollMs ?? 3000;
       for (const deadline = Date.now() + 15 * 60000; ;) {
@@ -528,13 +536,18 @@ export class MeetingController {
         if (task.status !== "running") return; // the result already arrived through submit_task_result
         let status = "unknown";
         try { status = await sessions.status(workspaceId, record.aiSessionId, task.turnId); } catch { /* try again next round */ }
-        if (status === "completed") { if (task.status === "running") Object.assign(task, { status: "done", finishedAt: Date.now(), result: null, error: "已执行完，但没有把结果交回会议页；可以在AI 助手会话列表里打开这场会议的后台会话查看" }); break; }
-        if (status === "failed" || status === "interrupted" || status === "unavailable") return fail(status === "interrupted" ? "执行被中断" : "执行失败，可以在会上重新请AI 助手做一次");
-        if (Date.now() > deadline) return fail("超过 15 分钟仍未完成，可能在等待确认；可以在AI 助手会话列表里打开这场会议的后台会话查看");
+        if (status === "completed") {
+          // Agents run from the command line hand back their final answer as output; the others report through submit_task_result.
+          const output = (await sessions.output?.(task.turnId).catch(() => null))?.trim();
+          if (task.status === "running") Object.assign(task, output ? { status: "done", finishedAt: Date.now(), result: output.slice(0, 20000), error: null } : { status: "done", finishedAt: Date.now(), result: null, error: "已执行完，但没有把结果交回会议页；可以在" + this.assistant.name + "的会话记录里查看这次执行" });
+          break;
+        }
+        if (status === "failed" || status === "interrupted" || status === "unavailable") return fail(status === "interrupted" ? "执行被中断" : "执行失败，可以在会上重新请" + this.assistant.name + "做一次");
+        if (Date.now() > deadline) return fail("超过 15 分钟仍未完成，可能在等待确认；可以在" + this.assistant.name + "的会话记录里查看这次执行");
       }
       await this.persist(record); this.emit();
       this.deps.log("task_completed", { success: true });
-    } catch { return fail("没能把任务交给AI 助手，请检查AI 助手是否已登录"); }
+    } catch { return fail("没能把任务交给" + this.assistant.name + "，请检查" + this.assistant.name + "是否可用"); }
   }
   /** Called by the background conversation (submit_task_result) with the outcome of one task. */
   async submitTaskResult(meetingId: string, taskId: string, markdown: string): Promise<{ ok: boolean }> {

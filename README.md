@@ -12,6 +12,7 @@
   - 思维导图：中心主题 → 议题 → 观点（默认）
   - 议题分区、流程线、方案对比、进度看板
   观点按类型区分（观点、方案、风险、结论、待办、待确认），每条都能追溯到原话；白板可以直接编辑，人工改动会被保留。
+- **会中 AI 执行**：会上直接点名助手派活，例如“AI助手，帮我查一下上季度流水，和去年同期比一下”。服务会识别出这句请求，交给你电脑上安装的 Codex、Claude Code 或 Cursor 在后台执行（可以读写文件、跑命令、联网），结果几秒到几分钟后出现在会议页面的“AI 执行”栏里，并弹出提示。助手的称呼和唤醒词可以自定义。
 - **会中问答**：Agent 能读取白板、字幕和你在白板上选中的元素，回答“刚才定了什么”“谁负责什么”“这个结论的原话是什么”，也能按你的要求切换白板形式或修改白板。
 - **会议纪要**：按一份完整的纪要规范生成 Markdown——会议概览、核心方向（议题 → 主题 → 要点）、关键决策、待办事项（含协作人与时间）。区分事实、观点与决策，不编造原文没有的内容，篇幅随会议长短自动控制。可导出为排版好的 HTML（适配手机与打印）。
 - **导出与留存**：每场会议单独保存，可导出完整 Markdown（纪要、整理结果、全部转写）。
@@ -29,7 +30,8 @@ flowchart LR
 
 - **转写**完全在本机完成。
 - **实时白板整理**和**服务端生成纪要**需要一个 OpenAI 兼容的模型接口（OpenAI、DeepSeek、通义千问、OpenRouter、本地 Ollama 等均可），转写文字只发送给你配置的这个接口。
-- **不配置模型也能用**：录音、字幕、会中问答照常；纪要由你正在使用的 Agent 按同一份规范直接写出，再保存回会议。
+- **不配置模型也能用**：录音、字幕、会中问答、会中 AI 执行照常（会上点名助手的那句话原样交给后台 Agent 理解）；纪要由你正在使用的 Agent 按同一份规范直接写出，再保存回会议。
+- **会中 AI 执行**由本机的 Agent 命令行完成：Codex 用 `codex exec`，Claude Code 用 `claude -p`，Cursor 用 `cursor-agent -p`。默认按 Codex、Claude Code、Cursor 的顺序使用第一个已安装的；都没有安装时这一功能自动关闭，会议页面不显示“AI 执行”。
 
 ## 环境要求
 
@@ -102,6 +104,7 @@ mkdir -p ~/.claude/skills && cp -R <dir>/skills/meeting-assistant ~/.claude/skil
 - “刚才关于上线时间是怎么定的？” / “目前有哪些待办？” —— 基于白板和原话回答
 - “把白板换成方案对比” / “重新整理一下白板”
 - “暂停” / “继续” / “结束会议”
+- 会上直接说：“AI助手，帮我把刚才的三个结论整理成待办” —— 后台执行，结果出现在会议页面
 - “生成会议纪要” / “导出这场会议”
 - “看一下昨天那场会的纪要”
 
@@ -114,6 +117,10 @@ mkdir -p ~/.claude/skills && cp -R <dir>/skills/meeting-assistant ~/.claude/skil
 | `MEETING_LLM_API_KEY` | 整理模型的 API Key（也会读取 `OPENAI_API_KEY`） | — |
 | `MEETING_LLM_BASE_URL` | OpenAI 兼容接口地址，例如 `https://api.deepseek.com/v1`、`http://localhost:11434/v1` | `https://api.openai.com/v1` |
 | `MEETING_LLM_MODEL` | 整理与纪要使用的模型 | `gpt-4.1-mini` |
+| `MEETING_TASK_RUNNER` | 会中 AI 执行使用的 Agent：`auto`、`codex`、`claude`、`cursor`，或 `off` 关闭 | `auto` |
+| `MEETING_ASSISTANT_NAME` | 会上点名助手用的称呼，也会作为专有名词提示给语音识别 | `AI助手` |
+| `MEETING_WAKE_WORDS` | 其他也算点名的叫法，逗号分隔，例如 `小助,Codex` | — |
+| `MEETING_TASK_CWD` | 后台执行任务时的工作目录 | 启动服务时的目录 |
 | `MEETING_ASSISTANT_HOME` | 会议记录、白板与模型的存放目录 | `~/.meeting-assistant` |
 | `MEETING_OPEN_BROWSER` | 设为 `0` 时不自动打开浏览器，只返回页面地址 | `1` |
 
@@ -140,6 +147,8 @@ mkdir -p ~/.claude/skills && cp -R <dir>/skills/meeting-assistant ~/.claude/skil
 - 会议记录、白板和导出文件都保存在 `MEETING_ASSISTANT_HOME` 下。
 - 会议页面只监听 `127.0.0.1`，每场会议使用随机地址。
 - 只有配置了整理模型时，转写文字才会发送给该模型接口。
+- 会中 AI 执行时，任务内容和最近的发言会交给本机的 Agent 命令行，由它按自己的配置调用模型。为了在开会时无人值守地完成，后台执行**跳过逐项确认**（Codex 的 `--dangerously-bypass-approvals-and-sandbox`、Claude Code 的 `--dangerously-skip-permissions`、Cursor 的 `--force`），它可以在 `MEETING_TASK_CWD` 下读写文件和运行命令。不需要这一功能，或会议里可能有不可信的发言者时，请设置 `MEETING_TASK_RUNNER=off`。
+- 同一个数据目录同一时间只运行一个会议服务；在另一个 Agent 窗口里再启动时，它会提示会议服务已在别处运行。
 
 ## 第三方组件
 

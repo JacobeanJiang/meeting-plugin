@@ -13,11 +13,11 @@ export const VAD: Record<Settings["vad"], { threshold: number; minMs: number }> 
 export function vocabularyTerms(vocabulary: string): string[] {
   return [...new Set(vocabulary.split(/[,，、;；\n]+/).map(term => term.trim()).filter(Boolean))].slice(0, 40);
 }
-export function asrPrompt(settings: Settings): string {
+export function asrPrompt(settings: Settings, assistantName = "AI 助手"): string {
   const base = PROMPT[settings.language][settings.script === "traditional" ? "traditional" : "simplified"];
   const terms = vocabularyTerms(settings.vocabulary);
   // The name people use to hand work to the assistant; spelled right, it is far easier to recognise a request.
-  if (settings.aiTasks !== false && (settings.language === "zh" || settings.language === "auto") && !terms.includes("AI 助手")) terms.unshift("AI 助手");
+  if (settings.aiTasks !== false && (settings.language === "zh" || settings.language === "auto") && !terms.includes(assistantName)) terms.unshift(assistantName);
   if (!terms.length) return base;
   return base + (settings.language === "en" ? " Terms that may appear: " + terms.join(", ") + "." : "会议中可能出现的词：" + terms.join("、") + "。");
 }

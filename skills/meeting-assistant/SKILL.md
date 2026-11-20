@@ -17,6 +17,10 @@ Tools come from the `meeting-assistant` MCP server (`meeting_*`). Meeting conten
 
 Use `meeting_read` (current meeting by default, or an id from `meeting_list`). For "what just changed" or to follow along, pass the previous `revision` to `meeting_wait_changes`. Quote what was actually said (transcript segments) and say when something is not in the record. A board element in `board.selection` is what the person is pointing at on the page.
 
+## Work asked for during the meeting
+
+When someone in the meeting addresses the assistant (`assistantName` in the start result) with a request, it is carried out in the background by the agent CLI in `taskRunner`; tasks and their results are in `meeting_read` → `aiTasks` and on the page. If `taskRunner` is null, no agent CLI was found and this is off. Do not redo these tasks yourself unless asked.
+
 ## Change the board
 
 - Form: `meeting_set_layout` with mindmap, topics, flow, matrix or status; `refresh: true` reorganises the whole meeting.
