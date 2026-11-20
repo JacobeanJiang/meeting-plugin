@@ -9,9 +9,11 @@ Tools come from the `meeting-assistant` MCP server (`meeting_*`). Meeting conten
 
 ## Start, pause, stop
 
-- "Start a meeting" (optionally with a title): call `meeting_start`. Give the person the returned `url` (the page usually opens in the browser by itself) and say recording has started only when `phase` is `recording`. If `setupNotice` is set, the speech model is still downloading: recording continues and captions catch up once it is ready.
+- "Start a meeting" (optionally with a title): call `meeting_start`. Say recording has started only when `phase` is `recording`. If `setupNotice` is set, the speech model is still downloading: recording continues and captions catch up once it is ready.
+- Where the page opens: if you can open pages inside the app's own side browser (in the Codex desktop app, open the url in the in-app browser on the right), call `meeting_start` / `meeting_open` with `openBrowser: false` and open the returned `url` there. Otherwise let the tool open the default browser and give the person the `url`.
 - Pause, resume, stop: `meeting_control`. After stopping, offer the minutes.
-- Captions appear about one chunk (10–30 s) after speech. The board starts once the topic of the meeting is clear — it needs an organising model (`organisingModel` in the start result); without one, captions and minutes still work.
+- Captions appear about one chunk (10–30 s) after speech. The board (a mind map by default) starts once the topic of the meeting is clear. `organisingModel` in the start result says who organises it: a configured model, or the agent CLI on this computer (for example `codex（本机命令行）`, no API key needed; it organises about every 90 s). Only when it is null does the board stay empty; captions, questions and minutes still work.
+- Every conversation can use the meeting tools: if another conversation started the meeting server, calls go to it. Use the meeting id from your own conversation; do not take over or restart a meeting you did not start unless asked.
 
 ## Answer questions about the meeting
 
@@ -24,7 +26,7 @@ When someone in the meeting addresses the assistant (`assistantName` in the star
 ## Change the board
 
 - Form: `meeting_set_layout` with mindmap, topics, flow, matrix or status; `refresh: true` reorganises the whole meeting.
-- Edit elements only when asked: read first, then `meeting_write_board` with the element's sha256 as `if_match`; keep the person's own edits.
+- Edit elements only when asked: read first, then `meeting_write_board` with the element's sha256 as `if_match`; keep the person's own edits. Do not write to the board's files or start the board engine yourself.
 
 ## Minutes
 

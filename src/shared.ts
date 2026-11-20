@@ -20,6 +20,11 @@ export const DEFAULT_TOPIC = "综合讨论";
 export type BoardForm = "topics" | "mindmap" | "flow" | "matrix" | "status";
 export const BOARD_FORMS: BoardForm[] = ["topics", "mindmap", "flow", "matrix", "status"];
 export const FORM_LABEL: Record<BoardForm, string> = { topics: "议题分区", mindmap: "思维导图", flow: "流程线", matrix: "方案对比", status: "进度看板" };
+/**
+ * How much room the board has on the screens showing it. "compact" (a narrow page or side panel) gets a narrower layout,
+ * fewer cards per topic and shorter wording from the organiser, so the board stays readable without zooming out.
+ */
+export type BoardSpace = "compact" | "normal";
 /** The model's judgement of what the meeting is about and which board form fits it. */
 export type MeetingPlan = { theme: string; center: string; type: string; form: BoardForm; reason: string; decidedAt: number; lockedBy: "model" | "user"; pendingForm: BoardForm | null; pendingCount: number };
 export type ItemKind = "point" | "proposal" | "risk" | "decision" | "action" | "question" | "step" | "status" | "cell";
@@ -62,6 +67,8 @@ export type Meeting = {
   /** Work requested of AI 助手 during this meeting, and the background conversation that carries it out. */
   aiTasks?: AiTask[];
   aiSessionId?: string | null;
+  /** The conversation people use to talk about this meeting (the one that started it, or one opened from the meeting page). */
+  chatSessionId?: string | null;
   /** Project of the conversation that started the meeting; background work runs there. */
   workspaceId?: string | null;
   /** Whole-meeting minutes written with the product minutes prompt (Markdown), and how far the transcript was covered. */

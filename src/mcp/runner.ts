@@ -7,14 +7,17 @@ import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { Generate } from "../server/summary";
 
 export type RunnerName = "codex" | "claude" | "cursor";
-type Spec = { bin: string; stdin: boolean; args: (cwd: string, lastMessage: string) => string[] };
+/** args: a task run (may edit files and run commands). organise: a text-only answer, used as the organising model. */
+type Spec = { bin: string; stdin: boolean; args: (cwd: string, lastMessage: string) => string[]; organise: (cwd: string, lastMessage: string) => string[] };
 const SPECS: Record<RunnerName, Spec> = {
   // The prompt goes through stdin where the CLI supports it, so it never passes through a shell.
-  codex: { bin: "codex", stdin: true, args: (cwd, lastMessage) => ["exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-C", cwd, "-o", lastMessage, "-"] },
-  claude: { bin: "claude", stdin: true, args: () => ["-p", "--dangerously-skip-permissions", "--output-format", "text"] },
-  cursor: { bin: "cursor-agent", stdin: false, args: cwd => ["-p", "--force", "--trust", "--output-format", "text", "--workspace", cwd] },
+  codex: { bin: "codex", stdin: true, args: (cwd, lastMessage) => ["exec", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-C", cwd, "-o", lastMessage, "-"],
+    organise: (cwd, lastMessage) => ["exec", "--skip-git-repo-check", "--sandbox", "read-only", "-c", "model_reasoning_effort=\"low\"", "-C", cwd, "-o", lastMessage, "-"] },
+  claude: { bin: "claude", stdin: true, args: () => ["-p", "--dangerously-skip-permissions", "--output-format", "text"], organise: () => ["-p", "--output-format", "text"] },
+  cursor: { bin: "cursor-agent", stdin: false, args: cwd => ["-p", "--force", "--trust", "--output-format", "text", "--workspace", cwd], organise: cwd => ["-p", "--trust", "--output-format", "text", "--workspace", cwd] },
 };
 const windows = process.platform === "win32";
 /** Absolute path of a command on PATH, or null. */
@@ -35,6 +38,32 @@ export function pickRunner(choice: string | undefined, find = locate): { name: R
   return null;
 }
 type Run = { child: ChildProcess; status: "running" | "completed" | "failed"; output: string; error: string };
+/**
+ * The agent CLI as the organising model, for people who have not configured an API key: one non-interactive, read-only run
+ * per request that only answers with text. Runs are marked so the meeting server they load stays idle.
+ */
+export function cliGenerate(runner: { name: RunnerName; path: string }, cwd: string, timeoutMs = 150000, spawnFn: typeof spawn = spawn): Generate {
+  const spec = SPECS[runner.name];
+  return ({ prompt, instructions }) => new Promise((resolve, reject) => {
+    const scratch = mkdtempSync(path.join(os.tmpdir(), "meeting-organise-"));
+    const lastMessage = path.join(scratch, "last-message.md");
+    const message = instructions + "\n\n以下是本次输入（JSON）：\n" + prompt + "\n\n只按上面的要求直接给出最终回答；不要调用任何工具，不要读写文件。";
+    const child = spawnFn(runner.path, [...spec.organise(cwd, lastMessage), ...(spec.stdin ? [] : [message])], { cwd, shell: windows && /\.(cmd|bat)$/i.test(runner.path), stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, MEETING_ASSISTANT_TASK_RUN: "1" } });
+    let output = "", settled = false;
+    const finish = (error: Error | null) => {
+      if (settled) return; settled = true; clearTimeout(timer);
+      if (runner.name === "codex") { try { output = readFileSync(lastMessage, "utf8"); } catch { /* fall back to what was printed */ } }
+      rmSync(scratch, { recursive: true, force: true });
+      if (error) reject(error); else if (!output.trim()) reject(Error(runner.name + " 没有返回整理结果")); else resolve({ text: output, model: runner.name });
+    };
+    const timer = setTimeout(() => { child.kill(); finish(Error("整理请求超时")); }, timeoutMs);
+    child.stdout?.on("data", chunk => { output += chunk; if (output.length > 400000) output = output.slice(-400000); });
+    child.stderr?.on("data", () => undefined);
+    child.on("error", error => finish(error));
+    child.on("close", code => finish(code === 0 ? null : Error(runner.name + " 整理失败（退出码 " + code + "）")));
+    if (spec.stdin) child.stdin?.end(message); else child.stdin?.end();
+  });
+}
 /** The sessions interface the meeting controller uses for background work, backed by one CLI run per task. */
 export function cliSessions(runner: { name: RunnerName; path: string }, cwd: string, spawnFn: typeof spawn = spawn) {
   const runs = new Map<string, Run>();

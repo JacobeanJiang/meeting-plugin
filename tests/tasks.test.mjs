@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
-import { mkdtemp, writeFile, chmod, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, chmod, rm, readFile } from 'node:fs/promises';
 import path from 'node:path';
 const load = async entry => { const b = await build({ entryPoints: [entry], bundle: true, write: false, platform: 'node', format: 'esm' }); return import('data:text/javascript;base64,' + Buffer.from(b.outputFiles[0].text).toString('base64')); };
 const { wakePattern, quickTasks, taskMessage, mentionsAssistant } = await load('src/server/tasks.ts');
-const { pickRunner, cliSessions } = await load('src/mcp/runner.ts');
+const { pickRunner, cliSessions, cliGenerate } = await load('src/mcp/runner.ts');
 const seg = (seq, text) => ({ id: 's' + seq, seq, startMs: seq * 15000, endMs: (seq + 1) * 15000, status: 'done', text, error: null, tag: null });
 
 test('any assistant name can be the wake word, with the usual speech-recognition spellings', () => {
@@ -52,5 +52,25 @@ test('the task runner picks an installed agent CLI and returns its final answer'
     for (let i = 0; i < 100 && await sessions.status(dir, 'local', bad) === 'running'; i++) await new Promise(r => setTimeout(r, 50));
     assert.equal(await sessions.status(dir, 'local', bad), 'failed');
     assert.equal(await sessions.status(dir, 'local', 'nope'), 'unavailable');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('without an API key the agent CLI organises: a read-only run whose final answer is the result', async () => {
+  const dir = await mkdtemp('/tmp/meeting-organise-');
+  try {
+    // A stand-in for codex exec: reads the prompt from stdin, writes its answer to the file after -o, records its arguments and environment.
+    const fake = path.join(dir, 'codex');
+    await writeFile(fake, "#!/usr/bin/env node\nlet s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const fs=require('fs'),a=process.argv.slice(2);fs.writeFileSync(process.argv[1]+'.seen',JSON.stringify({args:a,child:process.env.MEETING_ASSISTANT_TASK_RUN,prompt:s}));if(s.includes('FAIL'))process.exit(3);fs.writeFileSync(a[a.indexOf('-o')+1],'{\"plan\":{\"ready\":true}}');});\n");
+    await chmod(fake, 0o755);
+    const generate = cliGenerate({ name: 'codex', path: fake }, dir);
+    assert.deepEqual(await generate({ instructions: '白板规则', prompt: '{"mode":"append"}' }), { text: '{"plan":{"ready":true}}', model: 'codex' });
+    const seen = JSON.parse(await readFile(fake + '.seen', 'utf8'));
+    assert.ok(seen.args.includes('read-only'), 'organising never edits files or runs commands');
+    assert.ok(!seen.args.some(arg => /dangerously/.test(arg)), 'and never skips approvals');
+    assert.equal(seen.child, '1', 'the run is marked so the meeting server it loads stays idle');
+    assert.match(seen.prompt, /白板规则[\s\S]*"mode":"append"[\s\S]*不要调用任何工具/);
+    await assert.rejects(generate({ instructions: 'FAIL', prompt: '{}' }), /整理失败/);
+    const slow = path.join(dir, 'claude'); await writeFile(slow, '#!/bin/sh\nsleep 5\n'); await chmod(slow, 0o755);
+    await assert.rejects(cliGenerate({ name: 'claude', path: slow }, dir, 300)({ instructions: 'x', prompt: '{}' }), /超时/);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

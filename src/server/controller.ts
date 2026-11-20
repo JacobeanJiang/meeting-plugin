@@ -4,7 +4,7 @@ import { access, chmod, mkdir, readFile, readdir, rename, rm, writeFile } from "
 import { constants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { asrChoicesFor, type AiTask, BOARD_FORMS, DEFAULT_SETTINGS, DEFAULT_TOPIC, FORM_LABEL, markdown, type BoardForm, type Settings, type Meeting, type Snapshot, type Environment, type Segment } from "../shared";
+import { asrChoicesFor, type AiTask, BOARD_FORMS, DEFAULT_SETTINGS, DEFAULT_TOPIC, FORM_LABEL, markdown, type BoardForm, type BoardSpace, type Settings, type Meeting, type Snapshot, type Environment, type Segment } from "../shared";
 import { RETRY_PROMPT, VAD, asrConfig, asrPrompt, polishTranscript } from "./asr";
 import * as OpenCC from "opencc-js";
 import { ModelStore, WINDOWS_DEFAULTS, type SetupState } from "./models";
@@ -47,9 +47,16 @@ export type Deps = {
   quickTasks?: boolean;
   /** Seconds between status checks of a running task (tests shorten it). */
   taskPollMs?: number;
+  /** Least time between two organising rounds during a meeting (default 40 s); slower organisers such as an agent CLI use more. */
+  organiseEveryMs?: number;
+  /** Longest wait for one organising or minutes request (defaults 45 s and 60 s). */
+  organiseTimeoutMs?: number;
   /** Chinese script conversion; defaults to the bundled recorder in text mode. */
   convert?: (text: string, to: "Hans" | "Hant") => Promise<string>;
 };
+/** Board stage narrower than this, on any screen that reported in the last minute, gets the compact board. */
+export const COMPACT_BELOW_PX = 960;
+const VIEWPORT_TTL_MS = 60000;
 export function parseTranscript(output: string): string {
   if (/No speech detected, skipping transcription\./.test(output)) return "";
   // v1.2.2's CLI prints diagnostics followed by a blank line and then the transcript.
@@ -153,7 +160,7 @@ export class MeetingController {
         record.lastChange ??= null;
         record.summaries ??= [];
         record.minutes ??= null; if (record.minutes?.state === "working") record.minutes = { ...record.minutes, state: "failed", error: "会议助手重启时纪要还没生成完，请重新生成" };
-        record.chapters ??= null; record.nextMeetingId ??= null; record.aiTasks ??= []; record.aiSessionId ??= null; record.workspaceId ??= null;
+        record.chapters ??= null; record.nextMeetingId ??= null; record.aiTasks ??= []; record.aiSessionId ??= null; record.workspaceId ??= null; record.chatSessionId ??= null;
         for (const task of record.aiTasks) if (task.status === "running" || task.status === "queued") Object.assign(task, { status: "failed", error: "服务重启时任务还没完成，可以在会上重新请" + this.assistant.name + "做一次", finishedAt: task.finishedAt ?? Date.now() });
         for (const item of record.items) item.sub ??= null;
         record.requestedForm = null; record.redraw = null; // a redraw interrupted by a restart is simply not resumed
@@ -168,8 +175,32 @@ export class MeetingController {
     if (!this.windows) for (const file of [this.deps.voxtypePath, this.deps.recorderPath]) if (file && !this.deps.record) await chmod(file, 0o700).catch(() => undefined);
     this.prepare();
     // Background organising only follows a meeting that is still running; ended or interrupted meetings are organised on request.
-    this.tick = setInterval(() => { if (!this.disposed && this.settings.autoSummary && this.isActive()) void this.doSummary(false).catch(() => undefined); }, 45000);
+    this.tick = setInterval(() => { if (!this.disposed && this.settings.autoSummary && this.isActive()) void this.doSummary(false).catch(() => undefined); }, Math.max(45000, this.deps.organiseEveryMs ?? 0));
     this.tick.unref();
+  }
+  /** Screens showing a board report its width; the narrowest one seen in the last minute decides the layout and the organiser's budget. */
+  private viewports = new Map<string, { width: number; at: number }>();
+  boardSpace(now = Date.now()): BoardSpace {
+    for (const [viewer, seen] of this.viewports) if (now - seen.at > VIEWPORT_TTL_MS) this.viewports.delete(viewer);
+    return [...this.viewports.values()].some(seen => seen.width < COMPACT_BELOW_PX) ? "compact" : "normal";
+  }
+  /** Returns true when the board changes layout; the board is then redrawn. */
+  setViewport(viewer: string, width: number): boolean {
+    if (!Number.isFinite(width) || width <= 0) throw Error("无效的页面尺寸");
+    const before = this.boardSpace();
+    this.viewports.set(viewer.slice(0, 80), { width: Math.round(width), at: Date.now() });
+    if (this.viewports.size > 20) this.viewports.delete(this.viewports.keys().next().value!);
+    const changed = this.boardSpace() !== before;
+    if (changed) this.emit();
+    return changed;
+  }
+  /** Binds the conversation people use to talk about this meeting. */
+  async attachChat(id: string, workspaceId: string, sessionId: string): Promise<Snapshot> {
+    const record = this.records.get(id);
+    if (!record) throw Error("未找到会议");
+    record.workspaceId ??= workspaceId; record.chatSessionId = sessionId;
+    await this.persist(record); this.emit();
+    return this.snapshot(record);
   }
   private normalizeSettings(value: unknown): Settings {
     const r = value && typeof value === "object" ? value as Record<string, unknown> : {};
@@ -241,8 +272,12 @@ export class MeetingController {
   private isActive() { return this.current && ["starting", "recording", "paused", "stopping"].includes(this.current.phase); }
   private reusable(windowMs: number) { const record = this.current; return Boolean(record && ["starting", "recording", "paused"].includes(record.phase) && Date.now() - record.startedAt <= windowMs); }
   /** Quick-start entry: the composer may already have started this meeting a few seconds earlier. */
-  async startOrReuse(title: string, windowMs = 120000, origin?: { workspaceId?: string | null }): Promise<{ snapshot: Snapshot; reused: boolean; ended: { id: string; title: string } | null }> {
-    if (this.reusable(windowMs)) { if (origin?.workspaceId && this.current && !this.current.workspaceId) this.current.workspaceId = origin.workspaceId; return { snapshot: this.snapshot(), reused: true, ended: null }; }
+  async startOrReuse(title: string, windowMs = 120000, origin?: { workspaceId?: string | null; chatSessionId?: string | null }): Promise<{ snapshot: Snapshot; reused: boolean; ended: { id: string; title: string } | null }> {
+    if (this.reusable(windowMs)) {
+      if (origin?.workspaceId && this.current && !this.current.workspaceId) this.current.workspaceId = origin.workspaceId;
+      if (origin?.chatSessionId && this.current && !this.current.chatSessionId && (!origin.workspaceId || origin.workspaceId === this.current.workspaceId)) this.current.chatSessionId = origin.chatSessionId;
+      return { snapshot: this.snapshot(), reused: true, ended: null };
+    }
     try { const { snapshot, ended } = await this.newMeeting(title, origin); return { snapshot, reused: false, ended }; }
     catch (error) { if (this.reusable(windowMs)) return { snapshot: this.snapshot(), reused: true, ended: null }; throw error; }
   }
@@ -259,7 +294,7 @@ export class MeetingController {
     if (ended) for (const deadline = Date.now() + 60000; this.summarizing && Date.now() < deadline;) await wait(250);
     return ended;
   }
-  async newMeeting(title: string, origin?: { workspaceId?: string | null }): Promise<{ snapshot: Snapshot; ended: { id: string; title: string } | null }> {
+  async newMeeting(title: string, origin?: { workspaceId?: string | null; chatSessionId?: string | null }): Promise<{ snapshot: Snapshot; ended: { id: string; title: string } | null }> {
     const previous = this.current;
     const ended = await this.finishForNewMeeting();
     const snapshot = await this.start(title, origin ?? { workspaceId: previous?.workspaceId ?? null });
@@ -272,7 +307,7 @@ export class MeetingController {
     if (this.isActive() || this.processing) return { current: this.current?.id === id };
     await this.open(id); return { current: true };
   }
-  start(title: string, origin?: { workspaceId?: string | null }): Promise<Snapshot> {
+  start(title: string, origin?: { workspaceId?: string | null; chatSessionId?: string | null }): Promise<Snapshot> {
     return this.exclusive(async () => {
       if (this.isActive()) throw Error("已有一场会议正在录音（" + new Date(this.current!.startedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) + " 开始），请先在白板页或会议助手页结束它，再开始新会议");
       if (this.processing) throw Error("上一场会议还在转写最后几段录音，请等几秒再开始");
@@ -288,7 +323,7 @@ export class MeetingController {
       const model = await this.models.preferred(this.settings.asrModel);
       this.configFor = ""; // written once the model is on disk, see drain()
       if (this.models.state.status === "failed") this.prepare();
-      this.current = { id, title: title.trim().slice(0, 200) || "会议 " + new Date().toLocaleString(), startedAt: Date.now(), endedAt: null, phase: "starting", segments: [], notes: [], summaryThrough: -1, summaryAt: null, summaryState: "idle", summaryError: null, error: null, plan: null, items: [], links: [], summaries: [], lastChange: null, requestedForm: null, chapters: null, nextMeetingId: null, aiTasks: [], aiSessionId: null, minutes: null, redraw: null, workspaceId: origin?.workspaceId ?? null, audioFiles: {}, sessionDir, asrModel: model };
+      this.current = { id, title: title.trim().slice(0, 200) || "会议 " + new Date().toLocaleString(), startedAt: Date.now(), endedAt: null, phase: "starting", segments: [], notes: [], summaryThrough: -1, summaryAt: null, summaryState: "idle", summaryError: null, error: null, plan: null, items: [], links: [], summaries: [], lastChange: null, requestedForm: null, chapters: null, nextMeetingId: null, aiTasks: [], aiSessionId: null, chatSessionId: origin?.chatSessionId ?? null, minutes: null, redraw: null, workspaceId: origin?.workspaceId ?? null, audioFiles: {}, sessionDir, asrModel: model };
       this.records.set(id, this.current); this.level = null; this.recorderReady = false;
       await this.persist(); this.emit();
       this.startTimeout = setTimeout(() => {
@@ -422,7 +457,7 @@ export class MeetingController {
           await rm(file, { force: true }); delete record.audioFiles[segment.id];
           this.deps.log("segment_completed", { count: text.length, success: true });
           // Organise at most every 40 s: a little more speech per round gives the model clearer topics (DingTalk refreshes its viewpoint tree about once a minute).
-          if (text && this.settings.autoSummary && Date.now() - (record.summaryAt ?? 0) >= 40000) void this.doSummary(false).catch(() => undefined);
+          if (text && this.settings.autoSummary && Date.now() - (record.summaryAt ?? 0) >= (this.deps.organiseEveryMs ?? 40000)) void this.doSummary(false).catch(() => undefined);
           // A request to AI 助手 may be split across two segments, so the previous one is checked together with this one.
           const seq = segment.seq; const before = record.segments.filter(s => s.status === "done" && s.seq < seq).at(-1);
           if (text && this.settings.aiTasks && mentionsAssistant((before?.text ?? "") + text, this.assistant)) void this.findTasks(record).catch(() => undefined);
@@ -453,7 +488,7 @@ export class MeetingController {
     void this.persist(record).catch(() => undefined); this.emit();
     void (async () => {
       try {
-        const result = await generateMinutes(this.publicMeeting(record), this.deps.generate, this.settings.model);
+        const result = await generateMinutes(this.publicMeeting(record), this.deps.generate, this.settings.model, this.deps.organiseTimeoutMs ?? 60000);
         if (this.disposed) return;
         record.minutes = { markdown: result.markdown, at: Date.now(), through, model: result.model, state: "idle", error: null };
         this.deps.log("minutes_completed", { count: result.parts, success: true });
@@ -609,7 +644,7 @@ export class MeetingController {
         this.deps.log("summary_completed", { count: record.items.length, success: true });
         return;
       }
-      const result = await summarize(structuredClone(record), this.deps.generate, this.settings.model, { relayout, mustDecide, target: target ?? undefined, form: this.settings.defaultForm === "auto" ? undefined : this.settings.defaultForm });
+      const result = await summarize(structuredClone(record), this.deps.generate, this.settings.model, { relayout, mustDecide, target: target ?? undefined, form: this.settings.defaultForm === "auto" ? undefined : this.settings.defaultForm, space: this.boardSpace(), timeoutMs: this.deps.organiseTimeoutMs });
       if (this.disposed || this.current?.id !== record.id || token !== this.summaryToken) return;
       const now = Date.now();
       record.summaryAt = now; record.summaryState = "idle";
@@ -663,7 +698,7 @@ export class MeetingController {
       for (let attempt = 0; attempt < 2; attempt++) {
         if (this.disposed || token !== this.summaryToken || this.current?.id !== record.id) return false;
         try {
-          const result = await summarize(structuredClone(scratch), this.deps.generate, this.settings.model, { target });
+          const result = await summarize(structuredClone(scratch), this.deps.generate, this.settings.model, { target, space: this.boardSpace(), timeoutMs: this.deps.organiseTimeoutMs });
           if (!result) return true;
           scratch.summaryThrough = result.through;
           const chatter = Array.isArray(result.body.chatter) ? new Set(result.body.chatter) : new Set();

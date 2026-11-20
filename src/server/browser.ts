@@ -33,7 +33,9 @@ export class MeetingBrowser {
         if (request.method === "GET" && match?.[2]) {
           const snapshot = this.controller.view(meetingId);
           const boardUrl = await this.boards.open(meetingId,snapshot.meeting!.title);
-          response.end(JSON.stringify({ snapshot, boardUrl, boardError: this.boardError(meetingId) })); return;
+          // Content on the board besides the title, including what the conversation wrote there: the page stops showing "listening" once there is any.
+          const boardItems = (await this.boards.read(meetingId).catch(() => null))?.documents.filter(doc => doc.id !== "meeting-title" && doc.id !== "meeting-theme").length ?? 0;
+          response.end(JSON.stringify({ snapshot, boardUrl, boardError: this.boardError(meetingId), boardItems, boardSpace: this.controller.boardSpace() })); return;
         }
         if (request.method === "POST" && match?.[2] === "api") {
           if (origin !== this.base || !request.headers["content-type"]?.startsWith("application/json")) { response.writeHead(403);response.end();return; }
@@ -41,6 +43,7 @@ export class MeetingBrowser {
           for await (const chunk of request) {size+=chunk.length;if(size>16384){response.writeHead(413);response.end();return;}chunks.push(chunk);}
           const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {action?:unknown};
           if (body.action === "settings") { await this.controller.configure((body as { settings?: unknown }).settings); response.end(JSON.stringify({ ok: true })); return; }
+          if (body.action === "viewport") { this.controller.setViewport("page:" + match![1].slice(0, 12), Number((body as { width?: unknown }).width)); response.end(JSON.stringify({ ok: true, space: this.controller.boardSpace() })); return; }
           // A new meeting or another record: the page navigates to that meeting's own address.
           if (body.action === "new") { const { snapshot } = await this.controller.newMeeting(String((body as { title?: unknown }).title ?? "").slice(0, 200)); response.end(JSON.stringify({ ok: true, url: await this.open(snapshot.meeting!.id) })); return; }
           if (body.action === "switch") { const id = String((body as { id?: unknown }).id ?? ""); await this.controller.switchTo(id); response.end(JSON.stringify({ ok: true, url: await this.open(id) })); return; }

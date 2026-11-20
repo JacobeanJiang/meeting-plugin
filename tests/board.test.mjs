@@ -235,3 +235,33 @@ test('switching a topics board to a mind map never leaves dangling lines, even w
     assert.ok(docOf(await boards.read(id), 'it-i8'), 'syncing carries on');
   } finally { await boards.close(); }
 });
+
+test('compact board: a one-sided mind map within about 900 units, at most five cards per topic, the rest counted under the branch', async () => {
+  const boards = new MeetingBoards(path.join(scratch, 'd' + n), assets, () => 'compact'); const id = fresh();
+  const items = Array.from({ length: 8 }, (_, i) => item('i' + i, '首页改版', i === 1 ? 'decision' : 'point', '首页改版观点' + i, ['s0'])).concat([item('j0', '埋点口径', 'point', '埋点口径要跟数据组对齐', ['s4'])]);
+  try {
+    await boards.sync(snap(meeting(id, items, { plan: plan('mindmap') })));
+    const docs = (await boards.read(id)).documents;
+    const right = Math.max(...docs.filter(doc => doc.data.type !== 'arrow').map(doc => (doc.data.x ?? 0) + (doc.data.w ?? doc.data.wrap ?? 0)));
+    assert.ok(right <= 920, 'fits a narrow screen: right edge ' + right);
+    const shown = docs.filter(doc => /^it-i\d$/.test(doc.id)).map(doc => doc.id).sort();
+    assert.equal(shown.length, 5, 'five cards per topic');
+    assert.ok(shown.includes('it-i1'), 'the conclusion stays on the board'); assert.ok(shown.includes('it-i7'), 'the latest discussion stays on the board');
+    assert.match(docs.find(doc => doc.id.startsWith('fold-')).data.text, /已收起 3 条/);
+    const topic = name => docs.find(doc => doc.id.startsWith('mm-t-') && String(doc.data.text).includes(name)).data;
+    assert.equal(topic('埋点口径').x, topic('首页改版').x, 'topics in one column'); assert.ok(topic('埋点口径').y > topic('首页改版').y, 'the next topic below');
+    assert.ok(docOf({ documents: docs }, 'it-i7').data.x > topic('首页改版').x, 'viewpoints to the right of their topic');
+  } finally { await boards.close(); }
+});
+
+test('a wide board keeps the balanced mind map and shows at most eight cards per topic', async () => {
+  const boards = new MeetingBoards(path.join(scratch, 'd' + n), assets); const id = fresh();
+  const items = Array.from({ length: 10 }, (_, i) => item('i' + i, '首页改版', 'point', '首页改版观点' + i, ['s0']));
+  try {
+    await boards.sync(snap(meeting(id, items, { plan: plan('mindmap') })));
+    const docs = (await boards.read(id)).documents;
+    assert.equal(docs.filter(doc => /^it-i\d$/.test(doc.id)).length, 8);
+    assert.match(docs.find(doc => doc.id.startsWith('fold-')).data.text, /已收起 2 条/);
+    assert.ok(Math.max(...docs.filter(doc => doc.data.type !== 'arrow').map(doc => (doc.data.x ?? 0) + (doc.data.w ?? 0))) > 1200, 'the wide layout is unchanged');
+  } finally { await boards.close(); }
+});

@@ -10,4 +10,5 @@ test('desktop embedding patch refuses unexpected vendor headers or editor struct
  assert.throws(()=>signalBoardReady('<html></html>'),/changed/);
  const html=await readFile(new URL('../vendor/assets/editors/whiteboard/index.html',import.meta.url),'utf8');
  assert.match(signalBoardReady(html),/data-testid="board-canvas"/);
+ assert.match(signalBoardReady(html),/key:"0"[\s\S]*metaKey:true[\s\S]*xj-meeting-board-fit/,'the page can ask the editor to fit the board');
 });

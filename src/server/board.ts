@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { startBoardEngine, type BoardEngine } from "../../vendor/open-artifact.mjs";
-import type { Snapshot } from "../shared";
+import type { BoardSpace, Snapshot } from "../shared";
 import { layoutBoard } from "./layout";
 export type BoardRead = {
   meetingId: string; revision: string; observedAt: number;
@@ -21,7 +21,8 @@ export class MeetingBoards {
   private openings = new Set<Promise<string>>();
   private closing = false;
   private closeTask: Promise<void> | null = null;
-  constructor(private readonly data: string, private readonly assets: string) {}
+  /** space: how much room the screens showing the board have right now; the layout follows it. */
+  constructor(private readonly data: string, private readonly assets: string, private readonly space: () => BoardSpace = () => "normal") {}
   private root(id: string): string { if (!/^[a-f0-9-]{36}$/.test(id)) throw Error("无效会议"); return path.join(this.data, "boards", id); }
   private async getEngine(): Promise<BoardEngine> {
     if(this.closing)throw Error("白板服务正在关闭");
@@ -71,7 +72,7 @@ export class MeetingBoards {
     // (default fields, sub-pixel positions), which used to look like a person's edit and froze stale structure on the board.
     const structural = (doc: Doc) => doc.data.by === "agent" && (doc.data.type === "arrow" || doc.data.type === "container" || doc.id === "mm-center");
     const untouched = (doc: Doc) => written[doc.id] === doc.sha256 || structural(doc);
-    const desired = layoutBoard(meeting, new Set(link.deleted));
+    const desired = layoutBoard(meeting, new Set(link.deleted), this.space());
     const writes: { op: "set" | "delete"; path: string; if_match: string | null; data?: Record<string, unknown> }[] = [];
     // An arrow needs both ends: when a person removed a node (a topic, a viewpoint, the centre), its lines go too.
     const gone = (end: unknown) => typeof end === "string" && link.deleted.includes(end);

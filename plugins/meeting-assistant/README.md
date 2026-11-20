@@ -7,8 +7,8 @@
 ## 能做什么
 
 - **本地实时转写**：麦克风录音按 10–30 秒分段，用 whisper.cpp 在本机识别（默认 large-v3-turbo 量化模型），音频不出本机。支持中文、英文、日语、韩语及自动检测；中文可统一为简体或繁体，可添加专有名词提升识别准确率，并自动过滤静音、识别噪音和重复句。
-- **会议实时页面**：开会后在浏览器打开一个本地页面，左侧是白板，右侧是实时字幕，顶部显示录音状态、时长和音量；可以暂停、继续、结束，也可以切换查看历史会议。
-- **自动整理的白板**：先听一会儿，判断出会议主题后再开始绘制，按讨论推进逐步追加，不会推翻已有内容。支持五种形式：
+- **会议实时页面**：开会后打开一个本地页面（Codex 桌面版会放在右侧内置浏览器里），左侧是白板，右侧是实时字幕，顶部显示录音状态、时长和音量；可以暂停、继续、结束，也可以切换查看历史会议。页面在窄窗口里会收成一行工具栏，字幕改为按需展开，白板也会改用更窄的排版、每个议题最多显示 5 条，让侧栏里也能看清。
+- **自动整理的白板**：先听一会儿，判断出会议主题后再开始绘制，按讨论推进逐步追加，不会推翻已有内容。默认画成思维导图，支持五种形式：
   - 思维导图：中心主题 → 议题 → 观点（默认）
   - 议题分区、流程线、方案对比、进度看板
   观点按类型区分（观点、方案、风险、结论、待办、待确认），每条都能追溯到原话；白板可以直接编辑，人工改动会被保留。
@@ -23,15 +23,16 @@
 flowchart LR
   Mic["麦克风"] --> Rec["本机录音分段"] --> ASR["whisper.cpp 本地转写"]
   ASR --> Page["浏览器实时页面<br/>字幕 + 白板"]
-  ASR --> LLM["整理模型<br/>（可选）"] --> Page
+  ASR --> LLM["整理：模型接口<br/>或本机 Agent 命令行"] --> Page
   Agent["Codex / Claude Code / Cursor"] <-->|"MCP 工具"| Server["Meeting Assistant"]
   Server --- Page
 ```
 
 - **转写**完全在本机完成。
-- **实时白板整理**和**服务端生成纪要**需要一个 OpenAI 兼容的模型接口（OpenAI、DeepSeek、通义千问、OpenRouter、本地 Ollama 等均可），转写文字只发送给你配置的这个接口。
-- **不配置模型也能用**：录音、字幕、会中问答、会中 AI 执行照常（会上点名助手的那句话原样交给后台 Agent 理解）；纪要由你正在使用的 Agent 按同一份规范直接写出，再保存回会议。
-- **会中 AI 执行**由本机的 Agent 命令行完成：Codex 用 `codex exec`，Claude Code 用 `claude -p`，Cursor 用 `cursor-agent -p`。默认按 Codex、Claude Code、Cursor 的顺序使用第一个已安装的；都没有安装时这一功能自动关闭，会议页面不显示“AI 执行”。
+- **实时白板整理**和**服务端生成纪要**默认直接用你电脑上的 Agent 命令行完成（Codex 用 `codex exec`，只读、低推理强度；也支持 Claude Code、Cursor），不需要 API Key，用的是你自己的 Agent 账号额度，大约每 90 秒整理一次。也可以配置一个 OpenAI 兼容的模型接口（OpenAI、DeepSeek、通义千问、OpenRouter、本地 Ollama 等），配置后改用这个接口，整理更快（约 40 秒一次）。转写文字只发送给其中一方。
+- **既没有模型接口也没有 Agent 命令行**时：录音、字幕、会中问答照常，白板不会自动整理；纪要由你正在使用的 Agent 按同一份规范直接写出，再保存回会议。
+- **会中 AI 执行**同样由本机的 Agent 命令行完成：Codex 用 `codex exec`，Claude Code 用 `claude -p`，Cursor 用 `cursor-agent -p`。默认按 Codex、Claude Code、Cursor 的顺序使用第一个已安装的；都没有安装时这一功能自动关闭，会议页面的“AI 执行”栏会说明原因。
+- **多个会话一起用**：Agent 应用每开一个会话就会启动一个服务进程。第一个负责录音和保存，后开的会话会把操作转交给它，所以在哪个会话里都能开会、提问；负责的那个会话关闭后，其他会话会接着用同一份记录。
 
 ## 环境要求
 
@@ -53,6 +54,8 @@ codex plugin add meeting-assistant@meeting-assistant          # Windows 用 meet
 ```
 
 添加市场后，也可以在 Codex 桌面版的「插件」页面找到 Meeting Assistant 并安装。
+
+在命令行安装或升级后，请完全退出 Codex 桌面版（⌘Q）再重新打开：桌面版只在启动时读取插件列表，不重启时「自定义 → 插件 → 已安装」里看不到 Meeting Assistant，已经开着的会话也拿不到新版本的会议工具。
 
 **Claude Code**：
 
@@ -144,7 +147,7 @@ mkdir -p ~/.claude/skills && cp -R <dir>/skills/meeting-assistant ~/.claude/skil
 | `MEETING_LLM_API_KEY` | 整理模型的 API Key（也会读取 `OPENAI_API_KEY`） | — |
 | `MEETING_LLM_BASE_URL` | OpenAI 兼容接口地址，例如 `https://api.deepseek.com/v1`、`http://localhost:11434/v1` | `https://api.openai.com/v1` |
 | `MEETING_LLM_MODEL` | 整理与纪要使用的模型 | `gpt-4.1-mini` |
-| `MEETING_TASK_RUNNER` | 会中 AI 执行使用的 Agent：`auto`、`codex`、`claude`、`cursor`，或 `off` 关闭 | `auto` |
+| `MEETING_TASK_RUNNER` | 会中 AI 执行（以及未配置模型接口时的白板整理、纪要）使用的 Agent：`auto`、`codex`、`claude`、`cursor`，或 `off` 关闭 | `auto` |
 | `MEETING_ASSISTANT_NAME` | 会上点名助手用的称呼，也会作为专有名词提示给语音识别 | `AI助手` |
 | `MEETING_WAKE_WORDS` | 其他也算点名的叫法，逗号分隔，例如 `小助,Codex` | — |
 | `MEETING_TASK_CWD` | 后台执行任务时的工作目录 | `~/.meeting-assistant/tasks` |
@@ -174,9 +177,9 @@ mkdir -p ~/.claude/skills && cp -R <dir>/skills/meeting-assistant ~/.claude/skil
 - 音频只在本机处理，转写完成后删除分段音频；识别失败的片段会保留音频以便重试。
 - 会议记录、白板和导出文件都保存在 `MEETING_ASSISTANT_HOME` 下。
 - 会议页面只监听 `127.0.0.1`，每场会议使用随机地址。
-- 只有配置了整理模型时，转写文字才会发送给该模型接口。
+- 转写文字只会交给负责整理的一方：配置了模型接口时发给该接口；否则交给本机的 Agent 命令行（只读运行、不执行命令），由它按自己的配置调用模型。两者都没有时不发送。
 - 会中 AI 执行时，任务内容和最近的发言会交给本机的 Agent 命令行，由它按自己的配置调用模型。为了在开会时无人值守地完成，后台执行**跳过逐项确认**（Codex 的 `--dangerously-bypass-approvals-and-sandbox`、Claude Code 的 `--dangerously-skip-permissions`、Cursor 的 `--force`），它可以在 `MEETING_TASK_CWD` 下读写文件和运行命令。不需要这一功能，或会议里可能有不可信的发言者时，请设置 `MEETING_TASK_RUNNER=off`。
-- 同一个数据目录同一时间只运行一个会议服务；在另一个 Agent 窗口里再启动时，它会提示会议服务已在别处运行。
+- 同一个数据目录同一时间只有一个会议服务负责录音；其他会话的服务通过只监听 `127.0.0.1`、带随机口令（只有当前用户可读）的本地接口把操作转交给它。
 
 ## 第三方组件
 

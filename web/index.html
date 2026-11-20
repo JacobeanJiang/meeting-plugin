@@ -72,7 +72,7 @@ body.panel-open #toggle{background:var(--ink);color:#fff;box-shadow:none}
 .menu[hidden]{display:none}
 .tabs{display:flex;gap:2px;padding:2px;border-radius:9px;background:var(--paper)}
 .tab{height:26px;padding:0 10px;white-space:nowrap;flex:none;border-radius:7px;font-size:12.5px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:5px}
-body.no-ai .tab[data-tab=ai],body.no-ai .ai-setting,body.no-ai .ailist,body.no-ai .pop{display:none!important}
+body.no-ai .ai-setting,body.no-ai .pop{display:none!important}
 .tab.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(23,22,26,.12)}
 .tab em{font-style:normal;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--rec);color:#fff;font-size:10.5px;display:grid;place-items:center}
 .tab em[hidden]{display:none}
@@ -95,6 +95,7 @@ body.tab-ai .ailist{display:block}
 .md table{border-collapse:collapse;font-size:12px;margin:6px 0;display:block;overflow:auto}.md th,.md td{border:1px solid var(--line);padding:4px 6px;text-align:left}
 .md a{color:#3b4bbf}
 .ai-empty{padding:28px 6px;color:var(--muted);font-size:13px;line-height:1.7}.ai-empty b{display:block;color:var(--ink);font-size:14px;margin-bottom:4px}
+.ai-empty button{margin-top:10px;height:30px;padding:0 12px;border-radius:8px;background:var(--ink);color:#fff;font-size:12.5px}
 .pop{position:absolute;right:16px;bottom:16px;z-index:15;width:min(380px,calc(100% - 32px));max-height:60%;overflow:auto;padding:14px 16px;border-radius:16px;background:var(--surface);box-shadow:0 24px 60px -20px rgba(23,22,26,.45),0 0 0 1px var(--line);animation:pop .22s var(--ease) both}
 .pop[hidden]{display:none}
 .pop .who{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);margin-bottom:4px}
@@ -212,18 +213,26 @@ body:not(.panel-open) .panel{display:none}
 
 /* ---------- responsive ---------- */
 @media (max-width:1080px){.panel{width:300px}.ai span{display:none}}
+/* Narrow pages (a side browser): one compact bar, so the board keeps as much height as possible; captions open over the board. */
 @media (max-width:900px){
-  .bar{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"ident tools" "cap cap";row-gap:10px}
-  .ident{grid-area:ident}.tools{grid-area:tools}.capsule{grid-area:cap;justify-self:center}
-  .panel{position:absolute;right:12px;top:118px;bottom:12px;z-index:15;box-shadow:0 30px 60px -30px rgba(23,22,26,.5),0 0 0 1px var(--line);background:rgba(255,255,255,.94)}
-  main{position:relative}
+  .bar{grid-template-columns:minmax(0,1fr) auto auto;gap:8px;padding:8px 10px 6px}
+  .mark,.theme,.wave,#phase,.ai{display:none}
+  h1{font-size:14px}
+  .capsule{height:36px;gap:8px;padding:0 4px 0 12px}
+  .capsule .ctl{width:28px;height:28px}.capsule .end{height:28px;padding:0 10px}
+  .tools{gap:6px}.chip{height:30px;padding:0 9px}.icon{width:30px;height:30px}
+  main{position:relative;padding:2px 6px 6px;gap:6px}
+  .stage{--radius:12px}
+  .panel{position:absolute;right:6px;top:2px;bottom:6px;z-index:15;width:min(340px,calc(100% - 12px));box-shadow:0 30px 60px -30px rgba(23,22,26,.5),0 0 0 1px var(--line);background:rgba(255,255,255,.96)}
+  .listening{gap:10px}.orb{width:52px;height:52px}
 }
 @media (max-width:560px){
-  .bar{padding:10px 10px 8px}.wave,#phase{display:none}.chip small{display:none}.chip .label{max-width:72px;overflow:hidden;text-overflow:ellipsis}
-  .mark{width:30px;height:30px}.theme{display:none}main{padding:4px 8px 8px}
-  .panel{left:8px;right:8px;width:auto;top:106px}
+  .bar{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"ident tools" "cap cap";row-gap:6px}
+  .ident{grid-area:ident}.tools{grid-area:tools}.capsule{grid-area:cap;justify-self:stretch;justify-content:space-between}
+  .chip small{display:none}.chip .label{max-width:72px;overflow:hidden;text-overflow:ellipsis}
+  .panel{left:6px;right:6px;width:auto}
 }
-@media (max-height:420px){.theme{display:none}.bar{padding-top:8px;padding-bottom:6px}.capsule{height:38px}}
+@media (max-height:420px){.theme{display:none}.bar{padding-top:6px;padding-bottom:4px}.capsule{height:34px}}
 </style>
 </head>
 <body class="panel-open">
@@ -300,7 +309,7 @@ const time=ms=>{const n=Math.max(0,Math.floor(ms/1000));const h=Math.floor(n/360
 const wave=$('wave');for(let i=0;i<14;i++)wave.append(document.createElement('i'));
 for(const [form,name,hint,glyph] of FORMS){const b=document.createElement('button');b.setAttribute('role','menuitemradio');b.dataset.form=form;const g=document.createElement('span');g.className='glyph';g.textContent=glyph;const t=document.createElement('span');const n=document.createElement('b');n.textContent=name;const e=document.createElement('em');e.textContent=hint;t.append(n,e);b.append(g,t);b.onclick=()=>{closeMenu();post({action:'layout',form})};$('menu').append(b)}
 {const again=document.createElement('button');again.dataset.refresh='1';const g=document.createElement('span');g.className='glyph';g.textContent='↻';const t=document.createElement('span');const n=document.createElement('b');n.textContent='按当前形式重新整理全场';const e=document.createElement('em');e.textContent='合并重复、补齐分组小结；完成前保留当前白板';t.append(n,e);again.append(g,t);again.onclick=()=>{closeMenu();const p=latest&&latest.meeting&&latest.meeting.plan;if(p)post({action:'layout',form:p.form,refresh:true})};$('menu').append(again)}
-{const note=document.createElement('div');note.className='note';note.textContent='默认由 AI 根据会议内容选择；手动指定后不再自动更换。';$('menu').append(note)}
+{const note=document.createElement('div');note.className='note';note.textContent='新会议默认使用设置里的形式；在这里切换后不再自动更换。';$('menu').append(note)}
 function closeMenu(){$('menu').hidden=true;$('formBtn').setAttribute('aria-expanded','false')}
 $('formBtn').onclick=e=>{e.stopPropagation();const open=$('menu').hidden;$('menu').hidden=!open;$('formBtn').setAttribute('aria-expanded',String(open))};
 document.addEventListener('click',e=>{if(!$('menu').contains(e.target))closeMenu()});document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMenu()});
@@ -311,6 +320,9 @@ function render(data){
   const live=['starting','recording','paused','stopping'].includes(m.phase);document.body.classList.toggle('live',m.phase==='recording');
   $('title').textContent=m.title;document.title=m.title+' · 会议白板';
   const plan=m.plan;
+  // Anything on the board besides the title counts, including cards the conversation wrote there itself.
+  const hasBoard=(plan&&m.items.length)||data.boardItems>0;
+  const preferred=FORMS.find(f=>f[0]===(latest.settings&&latest.settings.defaultForm))||FORMS[0];
   $('theme').textContent=plan&&plan.theme?plan.theme:!plan?(live?'正在了解会议主题…':'本场内容不足以生成白板'):'会议主题整理中';$('theme').classList.toggle('wait',!plan||!plan.theme);
   const cap=$('capsule');cap.dataset.phase=m.phase;$('phase').textContent=PHASE[m.phase]||'';
   $('pause').innerHTML=m.phase==='paused'?ICON.play:ICON.pause;$('pause').setAttribute('aria-label',m.phase==='paused'?'继续录音':'暂停录音');
@@ -319,15 +331,17 @@ function render(data){
   const switching=m.requestedForm&&FORMS.find(f=>f[0]===m.requestedForm);const ai=$('ai');ai.classList.toggle('busy',m.summaryState==='working'||!!switching||(!plan&&live));
   $('ai').title=switching?'新形式整理好之前，白板保持当前内容':'';$('aiText').textContent=switching?'正在切换为「'+switching[1]+'」…':m.summaryState==='working'?'AI 正在整理':!plan?(live?'AI 正在聆听':'未生成白板'):'已整理到 '+time(through?through.endMs:0);
   const ch=m.lastChange;if(ch&&ch.at!==seenChange){if(seenChange){const parts=[];if(ch.rebuilt)parts.push('已按新形式重排');else{if(ch.added)parts.push('新增 '+ch.added);if(ch.revised)parts.push('更新 '+ch.revised);if(ch.linked)parts.push('关联 '+ch.linked)}if(parts.length){$('delta').textContent=parts.join(' · ');$('delta').hidden=false;clearTimeout(deltaTimer);deltaTimer=setTimeout(()=>$('delta').hidden=true,8000)}}seenChange=ch.at}
-  const current=FORMS.find(f=>f[0]===(plan&&plan.form));$('formLabel').textContent=current?current[1]:'白板形式';$('formBy').textContent=switching?'切换中':!plan?'待判断':plan.lockedBy==='user'?'已指定':'AI 选择';
+  const current=plan?FORMS.find(f=>f[0]===plan.form):preferred;$('formLabel').textContent=current?current[1]:'白板形式';$('formBy').textContent=switching?'切换中':!plan?'默认':plan.lockedBy==='user'?'已指定':'AI 选择';
   for(const b of $('menu').querySelectorAll('button[data-form]')){const on=plan&&b.dataset.form===plan.form;b.classList.toggle('on',!!on);b.setAttribute('aria-checked',String(!!on))}
   $('formBtn').disabled=!live&&m.phase!=='complete'&&m.phase!=='interrupted';
   $('summary').disabled=busy||m.summaryState==='working'||!done.length;
-  const listening=$('listening');listening.hidden=!!(plan&&m.items.length);listening.classList.toggle('idle',!live);
+  const listening=$('listening');listening.hidden=!!hasBoard;listening.classList.toggle('idle',!live);
   $('listenTitle').textContent=plan?(m.summaryState==='working'?'正在绘制白板':'还没有可上板的内容'):live?(m.phase==='paused'?'录音已暂停':'正在聆听'):'没有生成白板';
-  $('listenText').textContent=plan?'已判断出会议主题，AI 正在提炼第一批要点。':live?'先了解会议在讨论什么，判断出主题和方向后，再选合适的形式开始绘制。':'这场会议的有效发言较少，可以在右侧查看转写原文。';
-  const setup=latest.setup;if(setup&&setup.status!=='ready'&&!(plan&&m.items.length)){listening.hidden=false;$('listenTitle').textContent=setup.status==='failed'?'识别模型下载失败':'正在准备识别模型';$('listenText').textContent=setup.status==='failed'?(setup.error||'请检查网络')+'。录音已保存，可在会议助手页点“重新下载”，完成后自动转写。':setup.status==='downloading'&&setup.total?'首次使用需下载约 '+Math.round(setup.total/1048576)+'MB，已完成 '+Math.floor(setup.received/setup.total*100)+'%。录音照常进行，下载完成后自动补上转写。':'正在检查本机识别模型…'}
+  $('listenText').textContent=plan?'已判断出会议主题，AI 正在提炼第一批要点。':live?(latest.settings&&latest.settings.autoSummary===false?'自动整理已关闭，字幕照常记录；可在右上角设置里打开，或点“立即整理”。':'先听一会儿，内容足够后开始画「'+preferred[1]+'」。'):'这场会议的有效发言较少，可以在右侧查看转写原文。';
+  const setup=latest.setup;if(setup&&setup.status!=='ready'&&!hasBoard){listening.hidden=false;$('listenTitle').textContent=setup.status==='failed'?'识别模型下载失败':'正在准备识别模型';$('listenText').textContent=setup.status==='failed'?(setup.error||'请检查网络')+'。录音已保存，可在会议助手页点“重新下载”，完成后自动转写。':setup.status==='downloading'&&setup.total?'首次使用需下载约 '+Math.round(setup.total/1048576)+'MB，已完成 '+Math.floor(setup.received/setup.total*100)+'%。录音照常进行，下载完成后自动补上转写。':'正在检查本机识别模型…'}
   if(loaded!==data.boardUrl){$('board').src=data.boardUrl;loaded=data.boardUrl}
+  else if(data.boardSpace&&boardSpace&&data.boardSpace!==boardSpace)setTimeout(fitBoard,1200); // redrawn for a different screen size: fit once the new layout is in
+  if(data.boardSpace)boardSpace=data.boardSpace;
   renderFeed(m,latest.pending);renderTasks(m);
   const failed=m.segments.filter(s=>s.status==='failed').length;$('retry').hidden=!failed;$('retry').textContent='重试 '+failed+' 段失败';$('retry').disabled=busy||live;
   $('foot').textContent=done.length?done.length+' 段发言 · 白板可直接编辑，改动实时保存':'白板可直接编辑，改动实时保存';
@@ -409,9 +423,13 @@ function renderTasks(m){const tasks=m.aiTasks||[];const box=$('ailist');
   else for(const t of tasks){const before=seenTasks.get(t.id);if(before!==t.status){if(!before||t.status==='done'||t.status==='failed'){showPop(t);if(tab!=='ai')unread.add(t.id)}seenTasks.set(t.id,t.status)}}
   paintCount();
   for(const el of box.querySelectorAll('[data-task-time]')){const t=tasks.find(x=>x.id===el.dataset.taskTime);if(t&&el.textContent!==taskTime(t))el.textContent=taskTime(t)}
-  const key=JSON.stringify(tasks.map(t=>[t.id,t.status,t.result,t.error,t.instruction,t.quote,unread.has(t.id)]));if(box.dataset.key===key)return;box.dataset.key=key;const before=shownTasks;shownTasks=new Set(tasks.map(t=>t.id));
+  const key=JSON.stringify([latest&&latest.settings&&latest.settings.aiTasks,tasks.map(t=>[t.id,t.status,t.result,t.error,t.instruction,t.quote,unread.has(t.id)])]);if(box.dataset.key===key)return;box.dataset.key=key;const before=shownTasks;shownTasks=new Set(tasks.map(t=>t.id));
   box.replaceChildren();
-  if(!tasks.length){const e=document.createElement('div');e.className='ai-empty';e.innerHTML='<b>会上可以直接请AI 助手做事</b>说“AI 助手，帮我查一下……”“AI 助手，把刚才的结论整理成待办”，AI 助手会在后台执行，结果显示在这里。';box.append(e);return}
+  if(!tasks.length){const e=document.createElement('div');e.className='ai-empty';
+    if(document.body.classList.contains('no-ai'))e.innerHTML='<b>会中 AI 执行暂不可用</b>没有在这台电脑上找到 Codex、Claude Code 或 Cursor 的命令行，所以会上点名AI 助手的请求不会被执行。安装其中任意一个后，重新打开会议页即可使用。';
+    else if(latest&&latest.settings&&latest.settings.aiTasks===false){e.innerHTML='<b>会中 AI 执行已关闭</b>打开后，会上说“AI 助手，帮我……”，AI 助手会在后台执行，结果显示在这里。';const b=document.createElement('button');b.textContent='打开设置';b.onclick=openSettings;e.append(b)}
+    else e.innerHTML='<b>会上可以直接请AI 助手做事</b>说“AI 助手，帮我查一下……”“AI 助手，把刚才的结论整理成待办”，AI 助手会在后台执行，结果显示在这里。';
+    box.append(e);return}
   for(const t of [...tasks].sort((a,b)=>b.createdAt-a.createdAt)){const card=document.createElement('article');card.className='task';card.dataset.task=t.id;if(unread.has(t.id))card.classList.add('fresh');if(before.has(t.id))card.classList.add('still');
     const h=document.createElement('header');const st=document.createElement('span');st.className='st '+t.status;st.textContent=TASK_ST[t.status]||t.status;const tm=document.createElement('span');tm.dataset.taskTime=t.id;tm.textContent=taskTime(t);h.append(st,tm);
     const h4=document.createElement('h4');h4.textContent=t.instruction;
@@ -457,6 +475,17 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('drawer').hidden
 $('sSave').onclick=async()=>{if(!current)return;const next={...current,asrModel:$('sAsr').value||null,language:$('sLang').value,script:$('sScript').value,vocabulary:$('sVocab').value.trim(),vad:$('sVad').value,chunkSecs:Number($('sChunk').value),cleanup:$('sClean').checked,autoSummary:$('sAuto').checked,aiTasks:$('sAiTasks').checked,defaultForm:$('sForm').value};
   $('sSave').disabled=true;try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'settings',settings:next})});if(!r.ok)throw Error();closeSettings()}catch{dismissed='';toast('设置没有保存成功，请重试')}finally{$('sSave').disabled=false}};
 let polling=false;setInterval(async()=>{if(!polling){polling=true;await refresh();polling=false}},1000);refresh();
+// ---- board size ----
+// The page tells the meeting service how wide its board is: a narrow board gets a compact layout and shorter, fewer cards.
+// The whiteboard editor keeps its own view; it is asked to fit the board when it opens and after the layout changes
+// (it also fits by itself when its width changes a lot).
+let boardSpace='',reportedWidth=0,resizeTimer=0;
+const stageWidth=()=>Math.round(document.querySelector('.stage').clientWidth);
+function reportViewport(){const width=stageWidth();if(!width)return;reportedWidth=width;fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'viewport',width,height:Math.round(document.querySelector('.stage').clientHeight)})}).catch(()=>{})}
+function fitBoard(){const frame=$('board');if(loaded&&frame.contentWindow)frame.contentWindow.postMessage({type:'xj-meeting-board-fit'},'*')}
+addEventListener('message',event=>{if(event.source===$('board').contentWindow&&event.data&&event.data.type==='xj-meeting-board-ready')setTimeout(fitBoard,300)});
+addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(Math.abs(stageWidth()-reportedWidth)>8)reportViewport()},500)});
+setTimeout(reportViewport,300);setInterval(reportViewport,20000);
 </script>
 </body>
 </html>
