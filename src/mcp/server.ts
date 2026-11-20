@@ -22,7 +22,7 @@ import type { Generate } from "../server/summary";
 import { wakePattern, type Assistant } from "../server/tasks";
 import { cliSessions, pickRunner } from "./runner";
 
-const VERSION = "1.0.0";
+const VERSION = "1.2.0";
 // stdout carries the protocol only; anything else a dependency prints goes to stderr.
 console.log = console.info = (...args: unknown[]) => console.error(...args);
 const env = process.env;
@@ -78,7 +78,9 @@ const assistantName = (env.MEETING_ASSISTANT_NAME || "AI助手").trim();
 const wakeWords = (env.MEETING_WAKE_WORDS || "").split(/[,，]/).map(word => word.trim()).filter(Boolean);
 const assistant: Assistant = { name: assistantName, aliases: wakeWords, wake: wakePattern([assistantName, ...wakeWords]) };
 const runner = pickRunner(env.MEETING_TASK_RUNNER);
-const taskCwd = path.resolve(env.MEETING_TASK_CWD || process.cwd());
+// Tasks run in their own working folder unless one is given: an agent launched from a plugin would otherwise work inside the plugin's install folder.
+const taskCwd = path.resolve(env.MEETING_TASK_CWD || path.join(home, "tasks"));
+await mkdir(taskCwd, { recursive: true });
 const sessions = runner ? cliSessions(runner, taskCwd) : undefined;
 const boards = new MeetingBoards(data, here("../vendor/assets"));
 const boardErrors = new Map<string, string>();

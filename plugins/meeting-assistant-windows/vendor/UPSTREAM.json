@@ -1,0 +1,1 @@
+{"repository":"https://github.com/JimLiu/open-artifact","commit":"03158112d0dcba34cd4ea5dab95f600d5304ab07","license":"Apache-2.0","adapter":"adapter-source.ts.txt","notes":"Whiteboard editor is built in an isolated page; narrow Node type-server adapter bundled without host-private code. Normal plugin build is independent of upstream checkout."}

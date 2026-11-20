@@ -1,0 +1,31 @@
+{
+  "name": "meeting-assistant-windows",
+  "displayName": "Meeting Assistant (Windows)",
+  "version": "1.2.0",
+  "description": "Record meetings from the microphone with local transcription, a live self-organising board, Q&A about what was said, work handed to the agent during the meeting, and structured minutes. (Windows)",
+  "author": {
+    "name": "JacobeanJiang",
+    "url": "https://github.com/JacobeanJiang"
+  },
+  "homepage": "https://github.com/JacobeanJiang/meeting-plugin",
+  "repository": "https://github.com/JacobeanJiang/meeting-plugin",
+  "keywords": [
+    "meeting",
+    "minutes",
+    "transcription",
+    "whisper",
+    "whiteboard",
+    "mind-map",
+    "mcp"
+  ],
+  "icon": "./assets/icon.png",
+  "mcpServers": {
+    "meeting-assistant": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/server/index.mjs"
+      ]
+    }
+  },
+  "skills": "./skills/"
+}

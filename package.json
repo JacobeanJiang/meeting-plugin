@@ -1,6 +1,6 @@
 {
   "name": "meeting-assistant-mcp",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Meeting recording, live transcription, self-organising board and minutes as an MCP server for Codex, Claude Code, Cursor and other agents.",
   "private": true,
   "type": "module",
@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && node build.mjs",
     "build:windows": "npm run typecheck && node build.mjs windows",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "plugins": "node scripts/build-plugins.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

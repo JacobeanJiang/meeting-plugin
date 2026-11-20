@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "meeting-assistant": {
+      "command": "node",
+      "args": [
+        "./server/index.mjs"
+      ],
+      "cwd": ".",
+      "env_vars": [
+        "MEETING_LLM_API_KEY",
+        "MEETING_LLM_BASE_URL",
+        "MEETING_LLM_MODEL",
+        "OPENAI_API_KEY",
+        "MEETING_TASK_RUNNER",
+        "MEETING_ASSISTANT_NAME",
+        "MEETING_WAKE_WORDS",
+        "MEETING_TASK_CWD",
+        "MEETING_ASSISTANT_HOME",
+        "MEETING_OPEN_BROWSER",
+        "MEETING_NODE"
+      ],
+      "tool_timeout_sec": 120
+    }
+  }
+}

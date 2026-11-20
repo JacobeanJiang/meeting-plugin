@@ -1,0 +1,44 @@
+{
+  "name": "meeting-assistant",
+  "owner": {
+    "name": "JacobeanJiang",
+    "url": "https://github.com/JacobeanJiang"
+  },
+  "metadata": {
+    "description": "Meeting Assistant plugins"
+  },
+  "plugins": [
+    {
+      "name": "meeting-assistant",
+      "source": "./plugins/meeting-assistant",
+      "description": "Record meetings from the microphone with local transcription, a live self-organising board, Q&A about what was said, work handed to the agent during the meeting, and structured minutes. (macOS)",
+      "category": "productivity",
+      "homepage": "https://github.com/JacobeanJiang/meeting-plugin",
+      "keywords": [
+        "meeting",
+        "minutes",
+        "transcription",
+        "whisper",
+        "whiteboard",
+        "mind-map",
+        "mcp"
+      ]
+    },
+    {
+      "name": "meeting-assistant-windows",
+      "source": "./plugins/meeting-assistant-windows",
+      "description": "Record meetings from the microphone with local transcription, a live self-organising board, Q&A about what was said, work handed to the agent during the meeting, and structured minutes. (Windows)",
+      "category": "productivity",
+      "homepage": "https://github.com/JacobeanJiang/meeting-plugin",
+      "keywords": [
+        "meeting",
+        "minutes",
+        "transcription",
+        "whisper",
+        "whiteboard",
+        "mind-map",
+        "mcp"
+      ]
+    }
+  ]
+}

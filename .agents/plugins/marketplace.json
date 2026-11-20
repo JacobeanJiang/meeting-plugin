@@ -1,0 +1,32 @@
+{
+  "name": "meeting-assistant",
+  "interface": {
+    "displayName": "Meeting Assistant"
+  },
+  "plugins": [
+    {
+      "name": "meeting-assistant",
+      "source": {
+        "source": "local",
+        "path": "./plugins/meeting-assistant"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "meeting-assistant-windows",
+      "source": {
+        "source": "local",
+        "path": "./plugins/meeting-assistant-windows"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

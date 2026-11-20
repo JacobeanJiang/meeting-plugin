@@ -2,7 +2,7 @@
 
 为 AI 编程助手准备的会议工具：在会话里说一声“开始开会”，它就用本机麦克风录音、在本地实时转写，把讨论自动整理成白板，会中随时回答“刚才说到哪了”，会后按规范写出会议纪要。
 
-以 [MCP](https://modelcontextprotocol.io) 服务的形式提供，可接入 **Codex、Claude Code、Cursor**，以及 Windsurf、Cline、Continue 等任何支持 MCP（stdio）的 Agent。
+可以作为 **Codex、Claude Code 插件**一键安装，也可以作为 [MCP](https://modelcontextprotocol.io) 服务接入 **Codex、Claude Code、Cursor**，以及 Windsurf、Cline、Continue 等任何支持 MCP（stdio）的 Agent。
 
 ## 能做什么
 
@@ -41,6 +41,32 @@ flowchart LR
 
 ## 安装
 
+### 作为插件安装（推荐）
+
+这个仓库本身就是一个插件市场，里面有构建好的插件：`meeting-assistant`（macOS）和 `meeting-assistant-windows`（Windows）。插件里已经包含 MCP 服务、录音和识别程序以及配套技能，不需要自己构建。只要电脑上装有 Node.js 22 或以上即可（macOS 版会自动在 nvm、Homebrew、Volta、fnm 的常见位置寻找 Node）。
+
+**Codex**（命令行与桌面版共用）：
+
+```bash
+codex plugin marketplace add JacobeanJiang/meeting-plugin
+codex plugin add meeting-assistant@meeting-assistant          # Windows 用 meeting-assistant-windows@meeting-assistant
+```
+
+添加市场后，也可以在 Codex 桌面版的「插件」页面找到 Meeting Assistant 并安装。
+
+**Claude Code**：
+
+```text
+/plugin marketplace add JacobeanJiang/meeting-plugin
+/plugin install meeting-assistant@meeting-assistant
+```
+
+整理模型等配置通过环境变量传入（见下方“配置”），插件会从启动 Agent 时的环境中读取；不配置也能使用，纪要由 Agent 按规范直接撰写。
+
+### 手动接入 MCP 服务
+
+Cursor 及其他 MCP 客户端，或者需要自行构建时，用这种方式：
+
 ```bash
 git clone https://github.com/JacobeanJiang/meeting-plugin.git
 cd meeting-plugin
@@ -49,9 +75,10 @@ npm run build           # macOS：生成 dist-mcp/macos（需要 Xcode Command L
 npm run build:windows   # Windows 版：生成 dist-mcp/windows（在 macOS/Linux 上用 zig 交叉编译）
 ```
 
-构建产物目录可以复制到任意位置（Windows 版整目录拷到 Windows 电脑即可），下文用 `<dir>` 指代它。服务入口是 `<dir>/server/index.mjs`。
+构建产物目录可以复制到任意位置（Windows 版整目录拷到 Windows 电脑即可），下文用 `<dir>` 指代它。服务入口是 `<dir>/server/index.mjs`；也可以直接使用仓库里 `plugins/meeting-assistant` 或 `plugins/meeting-assistant-windows` 这两个现成目录。
 
-### Codex
+#### Codex
+
 
 在 `~/.codex/config.toml` 中加入：
 
@@ -65,7 +92,7 @@ env = { MEETING_LLM_API_KEY = "sk-...", MEETING_LLM_MODEL = "gpt-4.1-mini" }
 
 把 `<dir>/skills/meeting-assistant` 复制到 `~/.codex/skills/`，Codex 会在你提到开会、会议纪要时自动按它的流程使用这些工具。
 
-### Claude Code
+#### Claude Code
 
 ```bash
 claude mcp add meeting-assistant --scope user \
@@ -74,7 +101,7 @@ claude mcp add meeting-assistant --scope user \
 mkdir -p ~/.claude/skills && cp -R <dir>/skills/meeting-assistant ~/.claude/skills/
 ```
 
-### Cursor
+#### Cursor
 
 在 `~/.cursor/mcp.json`（全局）或项目的 `.cursor/mcp.json` 中加入：
 
@@ -92,7 +119,7 @@ mkdir -p ~/.claude/skills && cp -R <dir>/skills/meeting-assistant ~/.claude/skil
 
 工具自带说明，Cursor 无需额外配置即可使用；如需固定流程，可把 `skills/meeting-assistant/SKILL.md` 的内容加为项目规则。
 
-### 其他 MCP 客户端
+#### 其他 MCP 客户端
 
 以 stdio 方式运行 `node <dir>/server/index.mjs`，按需传入下方环境变量即可。
 
@@ -120,7 +147,8 @@ mkdir -p ~/.claude/skills && cp -R <dir>/skills/meeting-assistant ~/.claude/skil
 | `MEETING_TASK_RUNNER` | 会中 AI 执行使用的 Agent：`auto`、`codex`、`claude`、`cursor`，或 `off` 关闭 | `auto` |
 | `MEETING_ASSISTANT_NAME` | 会上点名助手用的称呼，也会作为专有名词提示给语音识别 | `AI助手` |
 | `MEETING_WAKE_WORDS` | 其他也算点名的叫法，逗号分隔，例如 `小助,Codex` | — |
-| `MEETING_TASK_CWD` | 后台执行任务时的工作目录 | 启动服务时的目录 |
+| `MEETING_TASK_CWD` | 后台执行任务时的工作目录 | `~/.meeting-assistant/tasks` |
+| `MEETING_NODE` | macOS 插件使用的 Node.js 路径（自动查找失败时指定） | 自动查找 |
 | `MEETING_ASSISTANT_HOME` | 会议记录、白板与模型的存放目录 | `~/.meeting-assistant` |
 | `MEETING_OPEN_BROWSER` | 设为 `0` 时不自动打开浏览器，只返回页面地址 | `1` |
 

@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>会议白板</title>
+<style>
+:root{
+  --paper:#f4f2ee;--surface:#fff;--ink:#17161a;--ink-2:#4f4b45;--muted:#948f86;--line:rgba(23,22,26,.08);--line-2:rgba(23,22,26,.14);
+  --rec:#ff4d2e;--rec-glow:rgba(255,77,46,.35);--amber:#f2a33a;--ok:#1f8a5b;--warn-bg:#fff4ec;--warn:#a8481c;
+  --radius:16px;--ease:cubic-bezier(.2,.8,.2,1);
+  font:14px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB",sans-serif;color:var(--ink);color-scheme:light;
+  -webkit-font-smoothing:antialiased;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;display:flex;flex-direction:column;overflow:hidden;
+  background:radial-gradient(1200px 500px at 85% -10%,rgba(255,77,46,.07),transparent 60%),radial-gradient(900px 500px at -10% 110%,rgba(31,138,91,.06),transparent 60%),var(--paper)}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;padding:0}
+button:disabled{opacity:.4;cursor:default}
+button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+svg{display:block}
+.num{font-family:"SF Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+
+/* ---------- top bar ---------- */
+.bar{position:relative;z-index:10;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:16px;padding:14px 18px 10px;animation:rise .5s var(--ease) both}
+.ident{display:flex;align-items:center;gap:12px;min-width:0}
+.mark{flex:none;width:34px;height:34px;border-radius:11px;background:var(--ink);display:flex;align-items:center;justify-content:center;gap:3px;box-shadow:0 6px 16px -8px rgba(23,22,26,.6)}
+.mark i{display:block;width:3px;border-radius:2px;background:#fff;animation:mark 1.6s ease-in-out infinite}
+.mark i:nth-child(1){height:8px}.mark i:nth-child(2){height:16px;animation-delay:.2s}.mark i:nth-child(3){height:11px;animation-delay:.4s}
+body:not(.live) .mark i{animation:none}
+.names{min-width:0}
+h1{margin:0;font-size:16px;font-weight:650;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.theme{margin:1px 0 0;font-size:12.5px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.theme.wait{color:var(--muted)}
+
+/* recording capsule */
+.capsule{display:flex;align-items:center;gap:10px;height:44px;padding:0 6px 0 16px;border-radius:999px;background:var(--ink);color:#fff;
+  box-shadow:0 14px 30px -14px rgba(23,22,26,.55),inset 0 0 0 1px rgba(255,255,255,.06);transition:background .3s,color .3s}
+.dot{width:9px;height:9px;border-radius:50%;background:#8b8781;flex:none;position:relative}
+.capsule[data-phase=recording] .dot{background:var(--rec)}
+.capsule[data-phase=recording] .dot::after{content:"";position:absolute;inset:-5px;border-radius:50%;border:2px solid var(--rec-glow);animation:ping 1.6s var(--ease) infinite}
+.capsule[data-phase=starting] .dot{animation:blink 1s ease-in-out infinite}
+.capsule[data-phase=paused] .dot{background:var(--amber)}
+#phase{font-size:12.5px;color:rgba(255,255,255,.72);white-space:nowrap}
+#clock{font-size:15px;font-weight:600;min-width:52px}
+.wave{display:flex;align-items:center;gap:2.5px;height:22px;width:74px}
+.wave i{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.85);transition:height .12s linear}
+.capsule .ctl{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.12);transition:background .2s}
+.capsule .ctl:hover:not(:disabled){background:rgba(255,255,255,.22)}
+.capsule .end{height:32px;padding:0 14px;border-radius:999px;background:var(--rec);color:#fff;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;transition:filter .2s}
+.capsule .end:hover:not(:disabled){filter:brightness(1.08)}
+.capsule[data-phase=complete],.capsule[data-phase=interrupted]{background:var(--surface);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line-2)}
+.capsule[data-phase=complete] #phase,.capsule[data-phase=interrupted] #phase{color:var(--muted)}
+.capsule[data-phase=complete] .rec-only,.capsule[data-phase=interrupted] .rec-only{display:none}
+.capsule[data-phase=complete]{padding-right:16px}
+
+/* right tools */
+.tools{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0}
+.ai{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-2);white-space:nowrap;min-width:0}
+.ai span{overflow:hidden;text-overflow:ellipsis}
+.ai.busy span{background:linear-gradient(90deg,var(--ink-2) 0%,var(--ink-2) 35%,#c9c3b8 50%,var(--ink-2) 65%,var(--ink-2) 100%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shimmer 2.2s linear infinite}
+.ai svg{flex:none;color:var(--rec)}
+.ai.busy svg{animation:spin 3s linear infinite}
+.chip{height:34px;padding:0 12px;border-radius:10px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line-2);display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap;transition:box-shadow .2s,background .2s}
+.chip:hover:not(:disabled){box-shadow:inset 0 0 0 1px var(--ink)}
+.chip small{color:var(--muted);font-size:11.5px}
+.icon{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line-2)}
+body.panel-open #toggle{background:var(--ink);color:#fff;box-shadow:none}
+.picker{position:relative}
+.menu{position:absolute;right:0;top:42px;z-index:20;width:268px;padding:6px;border-radius:14px;background:var(--surface);box-shadow:0 22px 50px -18px rgba(23,22,26,.4),0 0 0 1px var(--line);transform-origin:top right;animation:pop .18s var(--ease) both}
+.menu[hidden]{display:none}
+.tabs{display:flex;gap:2px;padding:2px;border-radius:9px;background:var(--paper)}
+.tab{height:26px;padding:0 10px;white-space:nowrap;flex:none;border-radius:7px;font-size:12.5px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:5px}
+body.no-ai .tab[data-tab=ai],body.no-ai .ai-setting,body.no-ai .ailist,body.no-ai .pop{display:none!important}
+.tab.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(23,22,26,.12)}
+.tab em{font-style:normal;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--rec);color:#fff;font-size:10.5px;display:grid;place-items:center}
+.tab em[hidden]{display:none}
+body.tab-ai .feed,body.tab-ai .cite,body.tab-ai .jump,body.tab-ai #summary{display:none!important}
+.ailist{flex:1;min-height:0;overflow:auto;padding:4px 12px 16px;display:none}
+body.tab-ai .ailist{display:block}
+.task{margin:8px 0;padding:12px 13px;border-radius:14px;background:var(--surface);box-shadow:0 0 0 1px var(--line);animation:pop .2s var(--ease) both}
+.task.still{animation:none}
+.task.fresh{box-shadow:0 0 0 2px var(--ink)}
+.task header{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:11.5px;color:var(--muted)}
+.task .st{padding:2px 7px;border-radius:999px;background:var(--paper);color:var(--ink-2);font-weight:600}
+.task .st.running{background:#eef2ff;color:#3b4bbf}.task .st.done{background:#e7f6ec;color:#1f7a45}.task .st.failed{background:#fdecea;color:#b3261e}
+.task h4{margin:0 0 4px;font-size:13.5px;line-height:1.5}
+.task .quote{font-size:12px;color:var(--muted);line-height:1.6;cursor:pointer}.task .quote:hover{color:var(--ink)}
+.task .err{margin-top:8px;font-size:12px;color:#b3261e;line-height:1.6}
+.md{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);font-size:13px;line-height:1.7;overflow-wrap:anywhere}
+.md h1,.md h2,.md h3,.md h4{font-size:13.5px;margin:8px 0 4px}.md p{margin:4px 0}.md ul,.md ol{margin:4px 0;padding-left:18px}
+.md code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--paper);padding:1px 4px;border-radius:4px}
+.md pre{background:var(--paper);padding:8px;border-radius:8px;overflow:auto}.md pre code{background:none;padding:0}
+.md table{border-collapse:collapse;font-size:12px;margin:6px 0;display:block;overflow:auto}.md th,.md td{border:1px solid var(--line);padding:4px 6px;text-align:left}
+.md a{color:#3b4bbf}
+.ai-empty{padding:28px 6px;color:var(--muted);font-size:13px;line-height:1.7}.ai-empty b{display:block;color:var(--ink);font-size:14px;margin-bottom:4px}
+.pop{position:absolute;right:16px;bottom:16px;z-index:15;width:min(380px,calc(100% - 32px));max-height:60%;overflow:auto;padding:14px 16px;border-radius:16px;background:var(--surface);box-shadow:0 24px 60px -20px rgba(23,22,26,.45),0 0 0 1px var(--line);animation:pop .22s var(--ease) both}
+.pop[hidden]{display:none}
+.pop .who{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);margin-bottom:4px}
+.pop .who b{color:var(--ink);font-size:12px}
+.pop h4{margin:0;font-size:14px;line-height:1.5}
+.pop .acts{display:flex;gap:6px;margin-top:10px}
+.pop .acts button{height:28px;padding:0 10px;border-radius:8px;font-size:12px;box-shadow:inset 0 0 0 1px var(--line-2)}
+.pop .acts .primary{background:var(--ink);color:#fff;box-shadow:none}
+.menu.meetings{left:0;right:auto;top:42px;width:300px;max-height:min(440px,70vh);overflow:auto;transform-origin:top left}
+.menu.meetings .new{background:var(--ink);color:var(--surface);margin-bottom:4px}.menu.meetings .new:hover{background:var(--ink-2)}.menu.meetings .new .glyph{background:rgba(255,255,255,.16);color:inherit}.menu.meetings .new em{color:rgba(255,255,255,.72)}
+.menu.meetings .new.confirm{background:var(--rec)}
+.menu.meetings .head{padding:8px 10px 4px;font-size:11.5px;color:var(--muted)}
+.menu.meetings .live-dot{width:7px;height:7px;border-radius:50%;background:var(--rec)}
+.menu button{width:100%;text-align:left;display:grid;grid-template-columns:22px 1fr auto;align-items:center;gap:10px;padding:9px 10px;border-radius:9px}
+.menu button:hover{background:var(--paper)}
+.menu b{display:block;font-weight:600;font-size:13px}
+.menu em{display:block;font-style:normal;font-size:11.5px;color:var(--muted)}
+.menu .on{background:var(--paper)}
+.menu .on::after{content:"";width:7px;height:7px;border-radius:50%;background:var(--ink)}
+.menu .glyph{width:22px;height:22px;border-radius:7px;background:var(--paper);display:grid;place-items:center;color:var(--ink-2)}
+.menu .note{padding:8px 10px 4px;font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);margin-top:4px}
+
+/* ---------- workspace ---------- */
+main{flex:1;min-height:0;display:flex;gap:12px;padding:4px 12px 12px}
+.stage{position:relative;flex:1;min-width:0;border-radius:var(--radius);overflow:hidden;background:var(--surface);
+  box-shadow:0 0 0 1px var(--line),0 30px 60px -40px rgba(23,22,26,.35);animation:rise .6s .05s var(--ease) both}
+iframe{display:block;border:0;width:100%;height:100%}
+.listening{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;pointer-events:none;padding:24px;width:min(360px,90%)}
+.listening[hidden]{display:none}
+.orb{position:relative;width:68px;height:68px;border-radius:50%;background:var(--ink);display:grid;place-items:center}
+.orb::before,.orb::after{content:"";position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(23,22,26,.25);animation:ring 2.4s var(--ease) infinite}
+.orb::after{animation-delay:1.2s}
+.listening.idle .orb::before,.listening.idle .orb::after{animation:none;opacity:0}
+.listening h2{margin:0;font-size:16px;font-weight:650}
+.listening p{margin:0;font-size:13px;color:var(--muted)}
+
+/* transcript panel */
+.panel{width:340px;flex:none;display:flex;flex-direction:column;min-height:0;border-radius:var(--radius);background:rgba(255,255,255,.72);
+  backdrop-filter:blur(12px);box-shadow:0 0 0 1px var(--line);overflow:hidden;animation:rise .6s .1s var(--ease) both}
+body:not(.panel-open) .panel{display:none}
+.panel-head{display:flex;align-items:center;gap:8px;padding:14px 14px 10px 16px}
+.panel-head h3{margin:0;font-size:13.5px;font-weight:650}
+.panel-head .spacer{flex:1}
+.panel-head .ghost{white-space:nowrap;flex:none}
+.ghost{height:28px;padding:0 10px;border-radius:8px;font-size:12.5px;color:var(--ink-2);display:flex;align-items:center;gap:5px}
+.ghost:hover:not(:disabled){background:var(--paper);color:var(--ink)}
+.feed{position:relative;flex:1;min-height:0;overflow:auto;padding:4px 16px 16px;scroll-behavior:smooth}
+.line{position:relative;padding:10px 0 10px 54px;animation:enter .45s var(--ease) both}
+.line time{position:absolute;left:0;top:12px;font-size:11px;color:var(--muted)}
+.line p{margin:0;font-size:14px;line-height:1.7;color:var(--ink-2);white-space:pre-wrap;overflow-wrap:anywhere}
+.line.now p{color:var(--ink)}
+.line.now::before{content:"";position:absolute;left:42px;top:14px;bottom:14px;width:2px;border-radius:2px;background:var(--rec)}
+.line.failed p{color:var(--warn)}
+.pending{display:flex;align-items:center;gap:8px;padding:10px 0 4px 54px;font-size:12.5px;color:var(--muted)}
+.pending[hidden]{display:none}
+.dots{display:inline-flex;gap:3px}.dots i{width:4px;height:4px;border-radius:50%;background:var(--muted);animation:bounce 1.2s ease-in-out infinite}
+.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+.empty{padding:28px 6px;color:var(--muted);font-size:13px;line-height:1.7}
+.empty b{display:block;color:var(--ink);font-size:14px;font-weight:600;margin-bottom:4px}
+.jump{position:absolute;left:50%;bottom:64px;transform:translateX(-50%);height:30px;padding:0 12px;border-radius:999px;background:var(--ink);color:#fff;font-size:12px;box-shadow:0 10px 24px -10px rgba(23,22,26,.6);animation:pop .2s var(--ease) both}
+.jump[hidden]{display:none}
+.panel-foot{display:flex;align-items:center;gap:8px;padding:10px 16px 12px;border-top:1px solid var(--line);font-size:11.5px;color:var(--muted)}
+.panel-foot span{flex:1}
+.retry{color:var(--warn);font-weight:600;font-size:12px}
+.retry[hidden]{display:none}
+
+/* toast */
+.toast{position:fixed;left:50%;top:70px;transform:translateX(-50%);z-index:30;max-width:min(560px,92vw);display:flex;align-items:center;gap:10px;padding:10px 12px 10px 14px;border-radius:12px;background:var(--warn-bg);color:var(--warn);font-size:13px;box-shadow:0 12px 30px -16px rgba(168,72,28,.5),0 0 0 1px rgba(168,72,28,.15);animation:pop .2s var(--ease) both}
+.toast[hidden]{display:none}
+.toast button{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;flex:none}
+.toast button:hover{background:rgba(168,72,28,.1)}
+
+
+.line .no{position:absolute;left:0;top:30px;font-size:10px;color:#c2bdb3}
+.line.cited{background:linear-gradient(90deg,rgba(255,77,46,.08),rgba(255,77,46,0) 85%);border-radius:10px;margin:0 -10px;padding-left:64px;padding-right:10px}
+.line.cited time{left:10px}.line.cited .no{left:10px;color:var(--rec)}
+.line.cited p{color:var(--ink)}
+.line.chatter p{color:#b8b3aa;font-size:13px}
+.line.chatter time::after{content:"闲聊";margin-left:6px;padding:0 5px;border-radius:4px;background:var(--paper);color:var(--muted);font-family:-apple-system,"PingFang SC",sans-serif;font-size:10px}
+.cite{display:flex;align-items:flex-start;gap:8px;margin:0 12px 6px;padding:10px 12px;border-radius:12px;background:var(--ink);color:#fff;font-size:12.5px;animation:pop .2s var(--ease) both}
+.cite[hidden]{display:none}
+.cite span{flex:1;min-width:0}.cite b{display:block;font-weight:600;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cite em{font-style:normal;color:rgba(255,255,255,.65)}
+.cite button{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;flex:none;color:#fff}.cite button:hover{background:rgba(255,255,255,.14)}
+.ai .delta{margin-left:4px;padding:1px 7px;border-radius:999px;background:var(--ink);color:#fff;font-size:11px;animation:pop .2s var(--ease) both}
+.ai .delta[hidden]{display:none}
+
+.drawer{position:fixed;top:0;right:0;bottom:0;z-index:40;width:min(400px,100vw);background:var(--surface);box-shadow:-30px 0 60px -30px rgba(23,22,26,.45),0 0 0 1px var(--line);display:flex;flex-direction:column;animation:slide .22s var(--ease) both}
+.drawer[hidden]{display:none}
+.scrim{position:fixed;inset:0;z-index:39;background:rgba(23,22,26,.18)}.scrim[hidden]{display:none}
+.drawer header{display:flex;align-items:center;padding:16px 16px 10px 20px}.drawer header h3{margin:0;flex:1;font-size:15px}
+.drawer .body{flex:1;overflow:auto;padding:0 20px 16px}
+.drawer h4{margin:18px 0 6px;font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.04em}
+.drawer label{display:block;margin:10px 0;font-size:13px;color:var(--ink-2)}
+.drawer select,.drawer textarea,.drawer input[type=text]{display:block;width:100%;margin-top:5px;padding:8px 10px;border-radius:9px;border:0;box-shadow:inset 0 0 0 1px var(--line-2);background:var(--surface);font:inherit;color:var(--ink)}
+.drawer select:focus,.drawer textarea:focus,.drawer input:focus{outline:2px solid var(--ink);outline-offset:0}
+.drawer small{display:block;margin-top:4px;font-size:11.5px;color:var(--muted)}
+.drawer .check{display:flex;gap:8px;align-items:flex-start}.drawer .check input{margin-top:3px;accent-color:var(--ink)}
+.drawer footer{display:flex;align-items:center;gap:10px;padding:12px 20px 16px;border-top:1px solid var(--line)}
+.drawer footer span{flex:1;font-size:11.5px;color:var(--muted)}
+.drawer .save{height:34px;padding:0 16px;border-radius:10px;background:var(--ink);color:#fff;font-weight:600}
+@keyframes slide{from{transform:translateX(24px);opacity:0}to{transform:none;opacity:1}}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes pop{from{opacity:0;transform:translate(var(--tx,0),4px) scale(.97)}to{opacity:1}}
+.jump,.toast{--tx:-50%}
+@keyframes ping{0%{transform:scale(.6);opacity:1}100%{transform:scale(1.6);opacity:0}}
+@keyframes ring{0%{transform:scale(1);opacity:.9}100%{transform:scale(1.9);opacity:0}}
+@keyframes blink{50%{opacity:.25}}
+@keyframes mark{50%{transform:scaleY(.45)}}
+@keyframes shimmer{from{background-position:120% 0}to{background-position:-120% 0}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes bounce{0%,80%,100%{transform:translateY(0);opacity:.5}40%{transform:translateY(-3px);opacity:1}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+
+/* ---------- responsive ---------- */
+@media (max-width:1080px){.panel{width:300px}.ai span{display:none}}
+@media (max-width:900px){
+  .bar{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"ident tools" "cap cap";row-gap:10px}
+  .ident{grid-area:ident}.tools{grid-area:tools}.capsule{grid-area:cap;justify-self:center}
+  .panel{position:absolute;right:12px;top:118px;bottom:12px;z-index:15;box-shadow:0 30px 60px -30px rgba(23,22,26,.5),0 0 0 1px var(--line);background:rgba(255,255,255,.94)}
+  main{position:relative}
+}
+@media (max-width:560px){
+  .bar{padding:10px 10px 8px}.wave,#phase{display:none}.chip small{display:none}.chip .label{max-width:72px;overflow:hidden;text-overflow:ellipsis}
+  .mark{width:30px;height:30px}.theme{display:none}main{padding:4px 8px 8px}
+  .panel{left:8px;right:8px;width:auto;top:106px}
+}
+@media (max-height:420px){.theme{display:none}.bar{padding-top:8px;padding-bottom:6px}.capsule{height:38px}}
+</style>
+</head>
+<body class="panel-open">
+<header class="bar">
+  <div class="ident">
+    <div class="mark" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="names"><h1 id="title">会议白板</h1><p class="theme wait" id="theme">正在连接…</p></div>
+    <div class="picker"><button class="icon" id="listBtn" aria-label="会议记录" aria-haspopup="menu" aria-expanded="false" title="会议记录"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M5.5 4h8M5.5 8h8M5.5 12h8"/><circle cx="2.6" cy="4" r=".6" fill="currentColor"/><circle cx="2.6" cy="8" r=".6" fill="currentColor"/><circle cx="2.6" cy="12" r=".6" fill="currentColor"/></svg></button><div class="menu meetings" id="meetings" role="menu" hidden></div></div>
+  </div>
+  <div class="capsule" id="capsule" data-phase="starting" role="group" aria-label="录音控制">
+    <span class="dot" aria-hidden="true"></span>
+    <span id="phase">连接中</span>
+    <span class="num" id="clock">00:00</span>
+    <span class="wave rec-only" id="wave" aria-hidden="true"></span>
+    <button class="ctl rec-only" id="pause" aria-label="暂停录音"></button>
+    <button class="end rec-only" id="stop"><svg width="10" height="10" viewBox="0 0 10 10"><rect width="10" height="10" rx="2" fill="currentColor"/></svg>结束</button>
+  </div>
+  <div class="tools">
+    <div class="ai" id="ai"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 0c.4 3.6 2.4 5.6 8 8-5.6 2.4-7.6 4.4-8 8-.4-3.6-2.4-5.6-8-8 5.6-2.4 7.6-4.4 8-8Z" fill="currentColor"/></svg><span id="aiText">准备中</span><em class="delta" id="delta" hidden></em></div>
+    <div class="picker">
+      <button class="chip" id="formBtn" aria-haspopup="menu" aria-expanded="false"><span class="label" id="formLabel">白板形式</span><small id="formBy"></small><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg></button>
+      <div class="menu" id="menu" role="menu" hidden></div>
+    </div>
+    <button class="icon" id="gear" aria-label="会议设置"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v1.8M8 12.7v1.8M14.5 8h-1.8M3.3 8H1.5M12.6 3.4l-1.3 1.3M4.7 11.3l-1.3 1.3M12.6 12.6l-1.3-1.3M4.7 4.7 3.4 3.4"/></svg></button>
+    <button class="icon" id="toggle" aria-label="显示或隐藏实时转写" aria-pressed="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="2.5" width="13" height="11" rx="2.5"/><path d="M10 2.5v11"/></svg></button>
+  </div>
+</header>
+<div class="toast" id="toast" role="alert" hidden><span id="toastText"></span><button id="toastClose" aria-label="关闭提示"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 2l6 6M8 2 2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" hidden aria-label="会议设置"><header><h3>会议设置</h3><button class="icon" id="drawerClose" aria-label="关闭设置"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 2l6 6M8 2 2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></header>
+<div class="body">
+<h4>语音识别</h4>
+<label>识别模型<select id="sAsr"></select></label>
+<label>会议语言<select id="sLang"><option value="zh">中文（普通话）</option><option value="auto">自动检测（中英夹杂时可试）</option><option value="en">英文</option><option value="ja">日语</option><option value="ko">韩语</option></select></label>
+<label>中文显示<select id="sScript"><option value="simplified">统一为简体</option><option value="traditional">统一为繁体</option><option value="original">保持识别原样</option></select></label>
+<label>专有名词<textarea id="sVocab" rows="3" maxlength="500" placeholder="人名、产品名、项目名，用逗号分隔"></textarea><small>提示识别模型优先识别这些词，减少同音错字。</small></label>
+<label>静音过滤<select id="sVad"><option value="strict">严格：嘈杂环境，少录杂音</option><option value="standard">标准</option><option value="loose">宽松：说话小声或离麦克风远</option></select></label>
+<label>分段时长<select id="sChunk"><option value="10">10 秒</option><option value="15">15 秒</option><option value="30">30 秒</option></select><small>分段越长上下文越完整、越准，文字出现越慢。</small></label>
+<label class="check"><input type="checkbox" id="sClean"><span>自动清理识别噪音<small>去掉混入的日文假名、重复句和开头乱码</small></span></label>
+<h4>AI 整理</h4>
+<label class="check"><input type="checkbox" id="sAuto"><span>会议中自动整理<small>转写文字会发送给所配置的整理模型</small></span></label>
+<label class="check ai-setting"><input type="checkbox" id="sAiTasks"><span>会中 AI 执行<small>会上说“AI 助手，帮我……”时，AI 助手 在后台直接执行，结果显示在“AI 执行”里</small></span></label>
+<h4>白板</h4>
+<label>新会议默认形式<select id="sForm"><option value="mindmap">思维导图：主题 → 议题 → 观点（推荐）</option><option value="topics">议题分区</option><option value="flow">流程线</option><option value="matrix">方案对比</option><option value="status">进度看板</option></select></label>
+</div>
+<footer><span id="sNote">识别相关设置从下一场会议生效</span><button class="save" id="sSave">保存</button></footer></aside>
+<main>
+  <section class="stage">
+    <iframe title="Open Artifact 会议白板" id="board" referrerpolicy="no-referrer"></iframe>
+    <div class="listening" id="listening" hidden>
+      <div class="orb" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M5 11v4M9 7v12M13 4v18M17 8v10M21 11v4"/></svg></div>
+      <h2 id="listenTitle">正在聆听</h2>
+      <p id="listenText">先了解会议在讨论什么，判断出主题和方向后，再选合适的形式开始绘制。</p>
+    </div>
+    <div class="pop" id="pop" hidden role="status"><div class="who"><b>AI 助手</b><span id="popState"></span></div><h4 id="popTitle"></h4><div class="md" id="popBody" hidden></div><div class="acts"><button class="primary" id="popView">查看</button><button id="popClose">关闭</button></div></div>
+  </section>
+  <aside class="panel" aria-label="实时字幕与 AI 执行">
+    <div class="panel-head"><div class="tabs" role="tablist"><button class="tab on" role="tab" data-tab="feed" aria-selected="true">实时字幕</button><button class="tab" role="tab" data-tab="ai" aria-selected="false">AI 执行<em id="aiCount" hidden></em></button></div><span class="spacer"></span>
+      <button class="ghost" id="summary" title="让 AI 立即整理最新内容"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M8 0c.4 3.6 2.4 5.6 8 8-5.6 2.4-7.6 4.4-8 8-.4-3.6-2.4-5.6-8-8 5.6-2.4 7.6-4.4 8-8Z" fill="currentColor"/></svg>立即整理</button></div>
+    <div class="cite" id="cite" hidden><span><b id="citeTitle"></b><em id="citeText"></em></span><button id="citeClose" aria-label="取消定位"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 2l6 6M8 2 2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
+    <div class="feed" id="feed" aria-live="polite"></div>
+    <div class="ailist" id="ailist" aria-live="polite"></div>
+    <button class="jump" id="jump" hidden>回到最新 ↓</button>
+    <div class="panel-foot"><span id="foot">白板可直接编辑，改动实时保存</span><button class="retry" id="retry" hidden>重试失败片段</button></div>
+  </aside>
+</main>
+<script>
+const base=new URL('api',location.href);const $=id=>document.getElementById(id);
+const PHASE={starting:'正在打开麦克风',recording:'录音中',paused:'已暂停',stopping:'正在收尾',complete:'已结束',interrupted:'录音中断'};
+const FORMS=[['mindmap','思维导图','主题 → 议题 → 观点（默认）','✳'],['topics','议题分区','评审、决策、多个议题','▦'],['flow','流程线','步骤、流程、排期','→'],['matrix','方案对比','多个方案取舍','⊞'],['status','进度看板','站会、周会、进度同步','☰']];
+const ICON={pause:'<svg width="12" height="12" viewBox="0 0 12 12"><rect x="2" y="1.5" width="2.6" height="9" rx="1" fill="currentColor"/><rect x="7.4" y="1.5" width="2.6" height="9" rx="1" fill="currentColor"/></svg>',play:'<svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 1.8v8.4c0 .5.5.8.9.5l6.4-4.2a.6.6 0 0 0 0-1L3.9 1.3c-.4-.3-.9 0-.9.5Z" fill="currentColor"/></svg>'};
+let latest=null,busy=false,loaded='',level=0,stick=true,toastKey='',dismissed='',cited=new Set(),citeFor='',seenChange=0,deltaTimer=0;const rendered=new Map();
+const time=ms=>{const n=Math.max(0,Math.floor(ms/1000));const h=Math.floor(n/3600),m=Math.floor(n%3600/60),s=n%60;return (h?h+':'+String(m).padStart(2,'0'):String(m).padStart(2,'0'))+':'+String(s).padStart(2,'0')};
+const wave=$('wave');for(let i=0;i<14;i++)wave.append(document.createElement('i'));
+for(const [form,name,hint,glyph] of FORMS){const b=document.createElement('button');b.setAttribute('role','menuitemradio');b.dataset.form=form;const g=document.createElement('span');g.className='glyph';g.textContent=glyph;const t=document.createElement('span');const n=document.createElement('b');n.textContent=name;const e=document.createElement('em');e.textContent=hint;t.append(n,e);b.append(g,t);b.onclick=()=>{closeMenu();post({action:'layout',form})};$('menu').append(b)}
+{const again=document.createElement('button');again.dataset.refresh='1';const g=document.createElement('span');g.className='glyph';g.textContent='↻';const t=document.createElement('span');const n=document.createElement('b');n.textContent='按当前形式重新整理全场';const e=document.createElement('em');e.textContent='合并重复、补齐分组小结；完成前保留当前白板';t.append(n,e);again.append(g,t);again.onclick=()=>{closeMenu();const p=latest&&latest.meeting&&latest.meeting.plan;if(p)post({action:'layout',form:p.form,refresh:true})};$('menu').append(again)}
+{const note=document.createElement('div');note.className='note';note.textContent='默认由 AI 根据会议内容选择；手动指定后不再自动更换。';$('menu').append(note)}
+function closeMenu(){$('menu').hidden=true;$('formBtn').setAttribute('aria-expanded','false')}
+$('formBtn').onclick=e=>{e.stopPropagation();const open=$('menu').hidden;$('menu').hidden=!open;$('formBtn').setAttribute('aria-expanded',String(open))};
+document.addEventListener('click',e=>{if(!$('menu').contains(e.target))closeMenu()});document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMenu()});
+function toast(text){if(!text){$('toast').hidden=true;toastKey='';return}if(text===dismissed)return;toastKey=text;$('toastText').textContent=text;$('toast').hidden=false}
+$('toastClose').onclick=()=>{dismissed=toastKey;$('toast').hidden=true};
+function render(data){
+  const m=data.snapshot.meeting;if(!m)return;latest=data.snapshot;level=typeof latest.levelDbfs==='number'?Math.min(1,Math.max(0,(latest.levelDbfs+55)/45)):0;
+  const live=['starting','recording','paused','stopping'].includes(m.phase);document.body.classList.toggle('live',m.phase==='recording');
+  $('title').textContent=m.title;document.title=m.title+' · 会议白板';
+  const plan=m.plan;
+  $('theme').textContent=plan&&plan.theme?plan.theme:!plan?(live?'正在了解会议主题…':'本场内容不足以生成白板'):'会议主题整理中';$('theme').classList.toggle('wait',!plan||!plan.theme);
+  const cap=$('capsule');cap.dataset.phase=m.phase;$('phase').textContent=PHASE[m.phase]||'';
+  $('pause').innerHTML=m.phase==='paused'?ICON.play:ICON.pause;$('pause').setAttribute('aria-label',m.phase==='paused'?'继续录音':'暂停录音');
+  $('pause').disabled=busy||!['recording','paused'].includes(m.phase);$('stop').disabled=busy||!['recording','paused','starting'].includes(m.phase);
+  const done=m.segments.filter(s=>s.status==='done');const through=m.segments.find(s=>s.seq===m.summaryThrough);
+  const switching=m.requestedForm&&FORMS.find(f=>f[0]===m.requestedForm);const ai=$('ai');ai.classList.toggle('busy',m.summaryState==='working'||!!switching||(!plan&&live));
+  $('ai').title=switching?'新形式整理好之前，白板保持当前内容':'';$('aiText').textContent=switching?'正在切换为「'+switching[1]+'」…':m.summaryState==='working'?'AI 正在整理':!plan?(live?'AI 正在聆听':'未生成白板'):'已整理到 '+time(through?through.endMs:0);
+  const ch=m.lastChange;if(ch&&ch.at!==seenChange){if(seenChange){const parts=[];if(ch.rebuilt)parts.push('已按新形式重排');else{if(ch.added)parts.push('新增 '+ch.added);if(ch.revised)parts.push('更新 '+ch.revised);if(ch.linked)parts.push('关联 '+ch.linked)}if(parts.length){$('delta').textContent=parts.join(' · ');$('delta').hidden=false;clearTimeout(deltaTimer);deltaTimer=setTimeout(()=>$('delta').hidden=true,8000)}}seenChange=ch.at}
+  const current=FORMS.find(f=>f[0]===(plan&&plan.form));$('formLabel').textContent=current?current[1]:'白板形式';$('formBy').textContent=switching?'切换中':!plan?'待判断':plan.lockedBy==='user'?'已指定':'AI 选择';
+  for(const b of $('menu').querySelectorAll('button[data-form]')){const on=plan&&b.dataset.form===plan.form;b.classList.toggle('on',!!on);b.setAttribute('aria-checked',String(!!on))}
+  $('formBtn').disabled=!live&&m.phase!=='complete'&&m.phase!=='interrupted';
+  $('summary').disabled=busy||m.summaryState==='working'||!done.length;
+  const listening=$('listening');listening.hidden=!!(plan&&m.items.length);listening.classList.toggle('idle',!live);
+  $('listenTitle').textContent=plan?(m.summaryState==='working'?'正在绘制白板':'还没有可上板的内容'):live?(m.phase==='paused'?'录音已暂停':'正在聆听'):'没有生成白板';
+  $('listenText').textContent=plan?'已判断出会议主题，AI 正在提炼第一批要点。':live?'先了解会议在讨论什么，判断出主题和方向后，再选合适的形式开始绘制。':'这场会议的有效发言较少，可以在右侧查看转写原文。';
+  const setup=latest.setup;if(setup&&setup.status!=='ready'&&!(plan&&m.items.length)){listening.hidden=false;$('listenTitle').textContent=setup.status==='failed'?'识别模型下载失败':'正在准备识别模型';$('listenText').textContent=setup.status==='failed'?(setup.error||'请检查网络')+'。录音已保存，可在会议助手页点“重新下载”，完成后自动转写。':setup.status==='downloading'&&setup.total?'首次使用需下载约 '+Math.round(setup.total/1048576)+'MB，已完成 '+Math.floor(setup.received/setup.total*100)+'%。录音照常进行，下载完成后自动补上转写。':'正在检查本机识别模型…'}
+  if(loaded!==data.boardUrl){$('board').src=data.boardUrl;loaded=data.boardUrl}
+  renderFeed(m,latest.pending);renderTasks(m);
+  const failed=m.segments.filter(s=>s.status==='failed').length;$('retry').hidden=!failed;$('retry').textContent='重试 '+failed+' 段失败';$('retry').disabled=busy||live;
+  $('foot').textContent=done.length?done.length+' 段发言 · 白板可直接编辑，改动实时保存':'白板可直接编辑，改动实时保存';
+  toast(data.boardError||m.error||m.summaryError||'');
+}
+function renderFeed(m,pending){
+  const feed=$('feed');const nearBottom=feed.scrollHeight-feed.scrollTop-feed.clientHeight<80;
+  const shown=m.segments.filter(s=>s.status==='done'||s.status==='failed');
+  const keep=new Set(shown.map(s=>s.id));for(const [id,node] of rendered)if(!keep.has(id)){node.remove();rendered.delete(id)}
+  let added=false;
+  for(const s of shown){let node=rendered.get(s.id);
+    if(!node){node=document.createElement('div');node.className='line';const t=document.createElement('time');t.className='num';const no=document.createElement('span');no.className='no num';node.append(t,no,document.createElement('p'));node.dataset.id=s.id;rendered.set(s.id,node);added=true}
+    node.querySelector('time').textContent=time(s.startMs);node.querySelector('.no').textContent='#'+(s.seq+1);node.classList.toggle('chatter',s.tag==='chatter');node.classList.toggle('cited',cited.has(s.id));node.querySelector('p').textContent=s.status==='done'?s.text:'这段没有识别成功，录音已保留，会后可重试';node.classList.toggle('failed',s.status==='failed');}
+  const ordered=shown.map(s=>rendered.get(s.id));ordered.forEach((node,i)=>{node.classList.toggle('now',i===ordered.length-1&&s_live(m));if(feed.children[i]!==node)feed.insertBefore(node,feed.children[i]||null)});
+  let pend=$('pendingRow');if(!pend){pend=document.createElement('div');pend.id='pendingRow';pend.className='pending';pend.innerHTML='<span class="dots"><i></i><i></i><i></i></span><span></span>'}
+  pend.hidden=!pending;pend.lastChild.textContent='正在识别'+(pending>1?' '+pending+' 段':'');feed.append(pend);
+  let empty=$('emptyRow');if(!shown.length&&!pending){if(!empty){empty=document.createElement('div');empty.id='emptyRow';empty.className='empty'}const live=s_live(m);empty.innerHTML='';const b=document.createElement('b');b.textContent=live?'正在倾听':'没有识别到发言';empty.append(b,document.createTextNode(live?'说话后约 15 秒，文字会出现在这里；安静的片段不会显示。':'这场会议没有识别到有效发言。'));feed.prepend(empty)}else if(empty)empty.remove();
+  if(added){if(stick||nearBottom){feed.scrollTop=feed.scrollHeight;$('jump').hidden=true}else $('jump').hidden=false}
+}
+const s_live=m=>['starting','recording','paused','stopping'].includes(m.phase);
+$('feed').addEventListener('scroll',()=>{const f=$('feed');stick=f.scrollHeight-f.scrollTop-f.clientHeight<80;if(stick)$('jump').hidden=true});
+$('jump').onclick=()=>{const f=$('feed');f.scrollTop=f.scrollHeight;stick=true;$('jump').hidden=true};
+async function refresh(){try{const r=await fetch(base,{cache:'no-store'});if(!r.ok)throw Error();render(await r.json())}catch{toast('会议服务连接中断。已有记录保存在会议助手内，请回到会话重新打开白板。')}}
+async function post(body){busy=true;try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw Error()}catch{dismissed='';toast(body.action==='layout'?'只能调整正在进行或刚结束的当前会议':'操作没有完成，请检查会议状态后重试')}finally{busy=false;await refresh()}}
+$('pause').onclick=()=>post({action:latest&&latest.meeting&&latest.meeting.phase==='paused'?'resume':'pause'});
+const STATUS={starting:'正在开始',recording:'录音中',paused:'已暂停',stopping:'正在收尾',complete:'已结束',interrupted:'已中断'};
+let confirmNew=false;
+function closeMeetings(){$('meetings').hidden=true;$('listBtn').setAttribute('aria-expanded','false');confirmNew=false}
+async function go(body,waiting){busy=true;if(waiting){dismissed='';toast(waiting)}try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json().catch(()=>({}));if(!r.ok||!j.url)throw Error();location.href=j.url}catch{dismissed='';toast(body.action==='new'?'没能开始新会议：上一场可能还在转写，请稍后再试':'没能打开这场会议，请稍后再试')}finally{busy=false}}
+async function openMeetings(){
+  let data;try{const r=await fetch(new URL('api/meetings',location.href),{cache:'no-store'});if(!r.ok)throw Error();data=await r.json()}catch{dismissed='';toast('暂时读取不到会议记录');return}
+  const box=$('meetings');box.replaceChildren();const cur=data.meetings.find(x=>x.id===data.current);const live=cur&&['starting','recording','paused','stopping'].includes(cur.phase);
+  const nb=document.createElement('button');nb.className='new';const g=document.createElement('span');g.className='glyph';g.textContent='＋';const t=document.createElement('span');const b=document.createElement('b');const e=document.createElement('em');
+  const paint=()=>{nb.classList.toggle('confirm',confirmNew);b.textContent=confirmNew?'结束当前会议并新建':'新会议';e.textContent=confirmNew?'当前会议会先保存，再开始新的录音':live?'当前会议仍在录音':'开始录音，生成一条新记录'};paint();
+  t.append(b,e);nb.append(g,t);nb.onclick=ev=>{ev.stopPropagation();if(busy)return;if(live&&!confirmNew){confirmNew=true;paint();return}closeMeetings();go({action:'new'},live?'正在结束并保存当前会议，随后开始新会议…':'正在开始新会议…')};box.append(nb);
+  const head=document.createElement('div');head.className='head';head.textContent='会议记录 · '+data.meetings.length+' 场';box.append(head);
+  for(const item of data.meetings){const x=document.createElement('button');x.setAttribute('role','menuitemradio');if(item.id===data.viewing)x.className='on';x.setAttribute('aria-checked',String(item.id===data.viewing));
+    const gl=document.createElement('span');gl.className='glyph';if(['recording','starting','paused'].includes(item.phase)){const d=document.createElement('i');d.className='live-dot';gl.append(d)}else gl.textContent='◷';
+    const tt=document.createElement('span');const bb=document.createElement('b');bb.textContent=item.theme||item.title;const ee=document.createElement('em');ee.textContent=new Date(item.startedAt).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})+' · '+(STATUS[item.phase]||'');tt.append(bb,ee);x.append(gl,tt);
+    x.onclick=()=>{closeMeetings();if(item.id!==data.viewing)go({action:'switch',id:item.id})};box.append(x)}
+  box.hidden=false;$('listBtn').setAttribute('aria-expanded','true');
+}
+$('listBtn').onclick=e=>{e.stopPropagation();if($('meetings').hidden)openMeetings();else closeMeetings()};
+document.addEventListener('click',e=>{if(!$('meetings').contains(e.target)&&e.target!==$('listBtn'))closeMeetings()});document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMeetings()});
+// ---- 会中 AI 执行 ----
+function inline(text){let s=text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  s=s.replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/\*([^*]+)\*/g,'<i>$1</i>');
+  s=s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  s=s.replace(/(^|[\s(（])(https?:\/\/[^\s<)）]+)/g,'$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');return s}
+function markdown(src){const lines=String(src||'').replace(/\r/g,'').split('\n');const out=[];let list=null,code=null,table=null;
+  const close=()=>{if(list){out.push('</'+list+'>');list=null}if(table){out.push('</table>');table=null}};
+  for(const raw of lines){if(code!==null){if(/^```/.test(raw)){out.push('<pre><code>'+code.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</code></pre>');code=null}else code+=raw+'\n';continue}
+    if(/^```/.test(raw)){close();code='';continue}
+    const line=raw.trimEnd();if(!line.trim()){close();continue}
+    let m;
+    if(/^\|.*\|$/.test(line.trim())){const cells=line.trim().slice(1,-1).split('|').map(c=>c.trim());if(cells.every(c=>/^:?-{2,}:?$/.test(c)))continue;if(!table){close();out.push('<table>');table=1;out.push('<tr>'+cells.map(c=>'<th>'+inline(c)+'</th>').join('')+'</tr>')}else out.push('<tr>'+cells.map(c=>'<td>'+inline(c)+'</td>').join('')+'</tr>');continue}
+    if((m=line.match(/^(#{1,4})\s+(.*)$/))){close();out.push('<h'+m[1].length+'>'+inline(m[2])+'</h'+m[1].length+'>');continue}
+    if((m=line.match(/^\s*[-*•]\s+(.*)$/))){if(list!=='ul'){close();out.push('<ul>');list='ul'}out.push('<li>'+inline(m[1])+'</li>');continue}
+    if((m=line.match(/^\s*\d+[.)、]\s*(.*)$/))){if(list!=='ol'){close();out.push('<ol>');list='ol'}out.push('<li>'+inline(m[1])+'</li>');continue}
+    close();out.push('<p>'+inline(line)+'</p>')}
+  if(code!==null)out.push('<pre><code>'+code.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</code></pre>');close();return out.join('')}
+const TASK_ST={queued:'排队中',running:'执行中',done:'已完成',failed:'没完成'};
+let tab='feed',seenTasks=null,unread=new Set(),popTask='',popTimer=0;
+function setTab(name){tab=name;document.body.classList.toggle('tab-ai',name==='ai');for(const b of document.querySelectorAll('.tab')){const on=b.dataset.tab===name;b.classList.toggle('on',on);b.setAttribute('aria-selected',String(on))}
+  if(name==='ai'){unread.clear();paintCount()}if(!document.body.classList.contains('panel-open')){document.body.classList.add('panel-open');$('toggle').setAttribute('aria-pressed','true')}}
+for(const b of document.querySelectorAll('.tab'))b.onclick=()=>setTab(b.dataset.tab);
+function paintCount(){const n=unread.size;$('aiCount').hidden=!n;$('aiCount').textContent=String(n)}
+function elapsed(t){const from=t.startedAt||t.createdAt;return time((t.finishedAt||Date.now())-from)}
+// Cards are rebuilt only when a task changes; the running time ticks in place, and only cards that are new play the entrance.
+let shownTasks=new Set();
+function taskTime(t){return new Date(t.createdAt).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})+(t.status==='running'||t.status==='done'||t.status==='failed'?' · 用时 '+elapsed(t):'')}
+function showPop(t){popTask=t.id;$('popState').textContent=t.status==='done'?'已完成':t.status==='failed'?'没完成':'收到任务';$('popTitle').textContent=t.instruction;
+  const body=$('popBody');if(t.status==='done'&&t.result){body.innerHTML=markdown(t.result);body.hidden=false}else if(t.status==='failed'||(t.status==='done'&&t.error)){body.textContent=t.error||'';body.hidden=!t.error}else body.hidden=true;
+  $('pop').hidden=false;clearTimeout(popTimer);popTimer=setTimeout(()=>{$('pop').hidden=true},t.status==='queued'||t.status==='running'?8000:30000)}
+$('popClose').onclick=()=>{$('pop').hidden=true};
+$('popView').onclick=()=>{$('pop').hidden=true;setTab('ai');const card=document.querySelector('[data-task="'+popTask+'"]');if(card)card.scrollIntoView({block:'nearest',behavior:'smooth'})};
+function renderTasks(m){const tasks=m.aiTasks||[];const box=$('ailist');
+  if(seenTasks===null){seenTasks=new Map(tasks.map(t=>[t.id,t.status]))}
+  else for(const t of tasks){const before=seenTasks.get(t.id);if(before!==t.status){if(!before||t.status==='done'||t.status==='failed'){showPop(t);if(tab!=='ai')unread.add(t.id)}seenTasks.set(t.id,t.status)}}
+  paintCount();
+  for(const el of box.querySelectorAll('[data-task-time]')){const t=tasks.find(x=>x.id===el.dataset.taskTime);if(t&&el.textContent!==taskTime(t))el.textContent=taskTime(t)}
+  const key=JSON.stringify(tasks.map(t=>[t.id,t.status,t.result,t.error,t.instruction,t.quote,unread.has(t.id)]));if(box.dataset.key===key)return;box.dataset.key=key;const before=shownTasks;shownTasks=new Set(tasks.map(t=>t.id));
+  box.replaceChildren();
+  if(!tasks.length){const e=document.createElement('div');e.className='ai-empty';e.innerHTML='<b>会上可以直接请AI 助手做事</b>说“AI 助手，帮我查一下……”“AI 助手，把刚才的结论整理成待办”，AI 助手会在后台执行，结果显示在这里。';box.append(e);return}
+  for(const t of [...tasks].sort((a,b)=>b.createdAt-a.createdAt)){const card=document.createElement('article');card.className='task';card.dataset.task=t.id;if(unread.has(t.id))card.classList.add('fresh');if(before.has(t.id))card.classList.add('still');
+    const h=document.createElement('header');const st=document.createElement('span');st.className='st '+t.status;st.textContent=TASK_ST[t.status]||t.status;const tm=document.createElement('span');tm.dataset.taskTime=t.id;tm.textContent=taskTime(t);h.append(st,tm);
+    const h4=document.createElement('h4');h4.textContent=t.instruction;
+    const q=document.createElement('div');q.className='quote';q.textContent='「'+t.quote+'」 '+t.refs.map(id=>'#'+(Number(id.slice(1))+1)).join(' ');q.title='在实时字幕中定位原话';q.onclick=()=>{setTab('feed');const row=rendered.get(t.refs[0]);if(row){stick=false;row.scrollIntoView({block:'center',behavior:'smooth'})}};
+    card.append(h,h4,q);
+    if(t.result){const md=document.createElement('div');md.className='md';md.innerHTML=markdown(t.result);card.append(md)}
+    if(t.error){const e=document.createElement('div');e.className='err';e.textContent=t.error;card.append(e)}
+    box.append(card)}}
+$('stop').onclick=()=>post({action:'stop'});$('summary').onclick=()=>post({action:'summarize'});$('retry').onclick=()=>post({action:'retry'});
+$('toggle').onclick=()=>{const open=document.body.classList.toggle('panel-open');$('toggle').setAttribute('aria-pressed',String(open))};
+if(matchMedia('(max-width:900px)').matches){document.body.classList.remove('panel-open');$('toggle').setAttribute('aria-pressed','false')}
+setInterval(()=>{const m=latest&&latest.meeting;if(m)$('clock').textContent=time((m.endedAt||Date.now())-m.startedAt)},1000);
+setInterval(()=>{const m=latest&&latest.meeting;const on=m&&m.phase==='recording';let i=0;for(const bar of wave.children){const shape=.55+.45*Math.sin(Date.now()/180+i*1.3);bar.style.height=on?Math.max(3,Math.round(3+19*level*shape*(.6+Math.random()*.4)))+'px':'3px';i++}},120);
+
+async function pollSelection(){const m=latest&&latest.meeting;if(!m){return}try{const r=await fetch(new URL('api/selection',location.href),{cache:'no-store'});if(!r.ok)return;const data=await r.json();const pick=[...data.selected].reverse().map(id=>resolvePick(id,m)).find(Boolean);const keyNow=pick?pick.id+'|'+pick.refs.join(','):'';if(keyNow===citeFor)return;citeFor=keyNow;showCite(pick,m)}catch{}}
+const SUBS={proposal:'提出的方案',risk:'风险与顾虑'};const OUT=['decision','action','question'];const subOf=i=>i.sub||SUBS[i.kind]||'讨论要点';
+/** A selected card, discussion block or group summary, as something with a title, text and cited segments. */
+function resolvePick(id,m){
+  if(id.startsWith('it-'))return m.items.find(i=>'it-'+i.id===id)||null;
+  if(id.startsWith('blk-')){const first=m.items.find(i=>'blk-'+i.id===id);if(!first)return null;const lines=m.items.filter(i=>i.group===first.group&&!OUT.includes(i.kind)&&subOf(i)===subOf(first));return {id,kind:'block',text:first.group+' · '+subOf(first)+'（'+lines.length+' 条）',refs:[...new Set(lines.flatMap(i=>i.refs))],previous:null}}
+  if(id.startsWith('sum-')){const first=m.items.find(i=>'sum-'+i.id===id);const s=first&&(m.summaries||[]).find(x=>x.group===first.group);return s?{id,kind:'summary',text:s.group+' · '+s.text,refs:s.refs,previous:s.previous}:null}
+  return null}
+function showCite(item,m){cited=new Set(item?item.refs:[]);for(const [id,node] of rendered)node.classList.toggle('cited',cited.has(id));if(!item){$('cite').hidden=true;return}
+  const label={point:'要点',proposal:'方案',risk:'风险',decision:'结论',action:'待办',question:'待确认',step:'步骤',status:'进度',cell:'对比',summary:'现状',block:'讨论'}[item.kind]||'';$('citeTitle').textContent=(label?label+' · ':'')+item.text;
+  const nums=item.refs.map(id=>'#'+(Number(id.slice(1))+1));$('citeText').textContent='依据原文 '+nums.join('、')+(item.previous?' · 曾记为：'+item.previous:'');$('cite').hidden=false;
+  if(!document.body.classList.contains('panel-open')){document.body.classList.add('panel-open');$('toggle').setAttribute('aria-pressed','true')}
+  const first=rendered.get(item.refs.find(id=>rendered.has(id)));if(first){stick=false;first.scrollIntoView({block:'center',behavior:'smooth'})}}
+$('citeClose').onclick=()=>showCite(null);
+setInterval(pollSelection,500);
+
+let current=null;
+let ASR_HINT={'large-v3-turbo-q5_0':'推荐 · 574MB','large-v3-turbo':'更准 · 1.6GB',small:'较快 · 488MB'};
+async function openSettings(){try{const r=await fetch(new URL('api/settings',location.href),{cache:'no-store'});if(!r.ok)throw Error();const data=await r.json();current=data.settings;const env=data.environment||{};if(env.asrChoices)ASR_HINT=Object.fromEntries(env.asrChoices.map(c=>[c.name,c.label]));
+  const sel=$('sAsr');sel.replaceChildren();const add=(v,t)=>{const o=document.createElement('option');o.value=v;o.textContent=t;sel.append(o)};add('','自动'+(env.defaultAsrModel?'（'+env.defaultAsrModel+'）':''));const have=env.asrModels||[];
+  for(const name of new Set([...Object.keys(ASR_HINT),...have,...(current.asrModel?[current.asrModel]:[])]))add(name,name+(ASR_HINT[name]?' · '+ASR_HINT[name]:'')+(have.includes(name)?'（已安装）':'（选择后自动下载）'));
+  sel.value=current.asrModel||'';$('sLang').value=current.language;$('sScript').value=current.script;$('sVocab').value=current.vocabulary;$('sVad').value=current.vad;$('sChunk').value=String(current.chunkSecs);$('sClean').checked=current.cleanup;$('sAuto').checked=current.autoSummary;$('sAiTasks').checked=current.aiTasks!==false;$('sForm').value=current.defaultForm;syncScript();
+  const live=latest&&latest.meeting&&['starting','recording','paused','stopping'].includes(latest.meeting.phase);$('sNote').textContent=live?'识别模型、语言、名词、静音和分段从下一场会议生效；其余立即生效':'保存后用于新会议';
+  $('drawer').hidden=false;$('scrim').hidden=false}catch{dismissed='';toast('暂时读取不到设置，请稍后重试')}}
+function closeSettings(){$('drawer').hidden=true;$('scrim').hidden=true}
+function syncScript(){$('sScript').disabled=!['zh','auto'].includes($('sLang').value)}
+$('sLang').onchange=syncScript;$('gear').onclick=openSettings;$('drawerClose').onclick=closeSettings;$('scrim').onclick=closeSettings;
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('drawer').hidden)closeSettings()});
+$('sSave').onclick=async()=>{if(!current)return;const next={...current,asrModel:$('sAsr').value||null,language:$('sLang').value,script:$('sScript').value,vocabulary:$('sVocab').value.trim(),vad:$('sVad').value,chunkSecs:Number($('sChunk').value),cleanup:$('sClean').checked,autoSummary:$('sAuto').checked,aiTasks:$('sAiTasks').checked,defaultForm:$('sForm').value};
+  $('sSave').disabled=true;try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'settings',settings:next})});if(!r.ok)throw Error();closeSettings()}catch{dismissed='';toast('设置没有保存成功，请重试')}finally{$('sSave').disabled=false}};
+let polling=false;setInterval(async()=>{if(!polling){polling=true;await refresh();polling=false}},1000);refresh();
+</script>
+</body>
+</html>

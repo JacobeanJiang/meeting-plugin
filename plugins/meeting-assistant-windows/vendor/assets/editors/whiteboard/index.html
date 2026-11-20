@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Whiteboard</title>
+    <script type="module" crossorigin src="./assets/index-TrzGo_VR.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DHbuI-cm.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  <script>(()=>{let observer;const notify=()=>{if(!document.querySelector('[data-testid="board-canvas"]'))return;observer?.disconnect();parent.postMessage({type:"xj-meeting-board-ready",version:1},"*");};observer=new MutationObserver(notify);observer.observe(document.body,{childList:true,subtree:true});notify();setTimeout(()=>observer.disconnect(),30000);})();</script></body>
+</html>

@@ -1,0 +1,45 @@
+{
+  "name": "meeting-assistant-windows",
+  "version": "1.2.0",
+  "description": "Record meetings from the microphone with local transcription, a live self-organising board, Q&A about what was said, work handed to the agent during the meeting, and structured minutes. (Windows)",
+  "author": {
+    "name": "JacobeanJiang",
+    "url": "https://github.com/JacobeanJiang"
+  },
+  "homepage": "https://github.com/JacobeanJiang/meeting-plugin",
+  "repository": "https://github.com/JacobeanJiang/meeting-plugin",
+  "keywords": [
+    "meeting",
+    "minutes",
+    "transcription",
+    "whisper",
+    "whiteboard",
+    "mind-map",
+    "mcp"
+  ],
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Meeting Assistant (Windows)",
+    "shortDescription": "Meetings: live transcription, board and minutes",
+    "longDescription": "Record meetings from the microphone with local transcription, a live self-organising board, Q&A about what was said, work handed to the agent during the meeting, and structured minutes.",
+    "developerName": "JacobeanJiang",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/JacobeanJiang/meeting-plugin",
+    "defaultPrompt": [
+      "开始开会，主题是本周项目同步",
+      "刚才会上定了哪些事？",
+      "生成会议纪要"
+    ],
+    "brandColor": "#17161A",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png",
+    "logoDark": "./assets/icon.png",
+    "screenshots": []
+  }
+}
