@@ -2878,7 +2878,7 @@ function cliSessions(runner2, cwd, spawnFn = spawn2) {
 }
 
 // src/mcp/server.ts
-var VERSION = "1.2.1";
+var VERSION = "1.2.2";
 console.log = console.info = (...args) => console.error(...args);
 var env = process.env;
 var home = path5.resolve(env.MEETING_ASSISTANT_HOME || path5.join(os4.homedir(), ".meeting-assistant"));
@@ -3050,6 +3050,7 @@ var read = async (input) => {
   };
 };
 var wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+var READ_ONLY = /* @__PURE__ */ new Set(["meeting_read", "meeting_wait_changes", "meeting_list"]);
 var id = { type: "string", description: "Meeting id; omit for the current meeting" };
 var tools = [
   {
@@ -3182,7 +3183,7 @@ var handle = async (message) => {
     case "ping":
       return reply({});
     case "tools/list":
-      return reply({ tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
+      return reply({ tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema, annotations: { readOnlyHint: READ_ONLY.has(name), destructiveHint: false, openWorldHint: false } })) });
     case "tools/call": {
       const tool = tools.find((entry) => entry.name === message.params?.name);
       if (!tool) return send({ jsonrpc: "2.0", id: message.id, error: { code: -32602, message: "Unknown tool" } });

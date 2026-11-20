@@ -34,6 +34,7 @@ test('an agent connects over stdio, lists the tools and reads, opens and exports
     const list = await t.request('tools/list', {});
     assert.deepEqual(list.result.tools.map(tool => tool.name).sort(), ['meeting_control', 'meeting_export', 'meeting_list', 'meeting_minutes', 'meeting_open', 'meeting_read', 'meeting_save_minutes', 'meeting_set_layout', 'meeting_start', 'meeting_wait_changes', 'meeting_write_board'].sort());
     for (const tool of list.result.tools) assert.equal(tool.inputSchema.type, 'object');
+    assert.deepEqual(list.result.tools.filter(tool => tool.annotations.readOnlyHint).map(tool => tool.name).sort(), ['meeting_list', 'meeting_read', 'meeting_wait_changes']);
     const meetings = await t.call('meeting_list');
     assert.equal(meetings.value.current, id); assert.equal(meetings.value.meetings[0].title, '接口排期评审');
     const read = await t.call('meeting_read', { afterSeq: 0 });

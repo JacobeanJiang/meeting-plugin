@@ -22,7 +22,7 @@ import type { Generate } from "../server/summary";
 import { wakePattern, type Assistant } from "../server/tasks";
 import { cliSessions, pickRunner } from "./runner";
 
-const VERSION = "1.2.1";
+const VERSION = "1.2.2";
 // stdout carries the protocol only; anything else a dependency prints goes to stderr.
 console.log = console.info = (...args: unknown[]) => console.error(...args);
 const env = process.env;
@@ -153,7 +153,9 @@ const read = async (input: unknown) => {
 };
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-type Tool = { name: string; description: string; inputSchema: Record<string, unknown>; run: (input: unknown) => Promise<unknown> };
+type Tool = { name: string; description: string; inputSchema: Record<string, unknown>; run: (input: unknown) => Promise<unknown>; readOnly?: boolean };
+/** Tools that only look at meetings; clients may run them without asking. */
+const READ_ONLY = new Set(["meeting_read", "meeting_wait_changes", "meeting_list"]);
 const id = { type: "string", description: "Meeting id; omit for the current meeting" };
 const tools: Tool[] = [
   { name: "meeting_start", description: "Start recording a meeting from the computer's microphone and open its live page (captions + board) in the browser. If a meeting started in the last two minutes is still running it is reused. Returns the meeting id and page url; recording is confirmed when phase is 'recording'.",
@@ -206,7 +208,7 @@ const handle = async (message: { id?: string | number; method?: string; params?:
   switch (message.method) {
     case "initialize": return reply({ protocolVersion: typeof message.params?.protocolVersion === "string" ? message.params.protocolVersion : "2025-06-18", capabilities: { tools: { listChanged: false } }, serverInfo: { name: "meeting-assistant", version: VERSION }, instructions: INSTRUCTIONS });
     case "ping": return reply({});
-    case "tools/list": return reply({ tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
+    case "tools/list": return reply({ tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema, annotations: { readOnlyHint: READ_ONLY.has(name), destructiveHint: false, openWorldHint: false } })) });
     case "tools/call": {
       const tool = tools.find(entry => entry.name === message.params?.name);
       if (!tool) return send({ jsonrpc: "2.0", id: message.id, error: { code: -32602, message: "Unknown tool" } });
