@@ -1,0 +1,5 @@
+node_modules/
+dist-mcp/
+# official voxtype release binary, downloaded and checksum-verified by build.mjs
+native/voxtype-1.2.2-macos-universal
+.DS_Store

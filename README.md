@@ -1,0 +1,152 @@
+# Meeting Assistant
+
+为 AI 编程助手准备的会议工具：在会话里说一声“开始开会”，它就用本机麦克风录音、在本地实时转写，把讨论自动整理成白板，会中随时回答“刚才说到哪了”，会后按规范写出会议纪要。
+
+以 [MCP](https://modelcontextprotocol.io) 服务的形式提供，可接入 **Codex、Claude Code、Cursor**，以及 Windsurf、Cline、Continue 等任何支持 MCP（stdio）的 Agent。
+
+## 能做什么
+
+- **本地实时转写**：麦克风录音按 10–30 秒分段，用 whisper.cpp 在本机识别（默认 large-v3-turbo 量化模型），音频不出本机。支持中文、英文、日语、韩语及自动检测；中文可统一为简体或繁体，可添加专有名词提升识别准确率，并自动过滤静音、识别噪音和重复句。
+- **会议实时页面**：开会后在浏览器打开一个本地页面，左侧是白板，右侧是实时字幕，顶部显示录音状态、时长和音量；可以暂停、继续、结束，也可以切换查看历史会议。
+- **自动整理的白板**：先听一会儿，判断出会议主题后再开始绘制，按讨论推进逐步追加，不会推翻已有内容。支持五种形式：
+  - 思维导图：中心主题 → 议题 → 观点（默认）
+  - 议题分区、流程线、方案对比、进度看板
+  观点按类型区分（观点、方案、风险、结论、待办、待确认），每条都能追溯到原话；白板可以直接编辑，人工改动会被保留。
+- **会中问答**：Agent 能读取白板、字幕和你在白板上选中的元素，回答“刚才定了什么”“谁负责什么”“这个结论的原话是什么”，也能按你的要求切换白板形式或修改白板。
+- **会议纪要**：按一份完整的纪要规范生成 Markdown——会议概览、核心方向（议题 → 主题 → 要点）、关键决策、待办事项（含协作人与时间）。区分事实、观点与决策，不编造原文没有的内容，篇幅随会议长短自动控制。可导出为排版好的 HTML（适配手机与打印）。
+- **导出与留存**：每场会议单独保存，可导出完整 Markdown（纪要、整理结果、全部转写）。
+
+## 工作方式
+
+```mermaid
+flowchart LR
+  Mic["麦克风"] --> Rec["本机录音分段"] --> ASR["whisper.cpp 本地转写"]
+  ASR --> Page["浏览器实时页面<br/>字幕 + 白板"]
+  ASR --> LLM["整理模型<br/>（可选）"] --> Page
+  Agent["Codex / Claude Code / Cursor"] <-->|"MCP 工具"| Server["Meeting Assistant"]
+  Server --- Page
+```
+
+- **转写**完全在本机完成。
+- **实时白板整理**和**服务端生成纪要**需要一个 OpenAI 兼容的模型接口（OpenAI、DeepSeek、通义千问、OpenRouter、本地 Ollama 等均可），转写文字只发送给你配置的这个接口。
+- **不配置模型也能用**：录音、字幕、会中问答照常；纪要由你正在使用的 Agent 按同一份规范直接写出，再保存回会议。
+
+## 环境要求
+
+- macOS 12 及以上（Apple Silicon / Intel）或 Windows 10 及以上（x64）
+- Node.js 22 及以上
+- 首次使用会自动下载识别模型（约 574 MB，huggingface.co 不可用时自动改用 hf-mirror.com，支持断点续传）；下载期间可以照常开会，录音先保存，模型就绪后自动补上转写。
+
+## 安装
+
+```bash
+git clone https://github.com/JacobeanJiang/meeting-plugin.git
+cd meeting-plugin
+npm ci
+npm run build           # macOS：生成 dist-mcp/macos（需要 Xcode Command Line Tools）
+npm run build:windows   # Windows 版：生成 dist-mcp/windows（在 macOS/Linux 上用 zig 交叉编译）
+```
+
+构建产物目录可以复制到任意位置（Windows 版整目录拷到 Windows 电脑即可），下文用 `<dir>` 指代它。服务入口是 `<dir>/server/index.mjs`。
+
+### Codex
+
+在 `~/.codex/config.toml` 中加入：
+
+```toml
+[mcp_servers.meeting-assistant]
+command = "node"
+args = ["<dir>/server/index.mjs"]
+tool_timeout_sec = 120
+env = { MEETING_LLM_API_KEY = "sk-...", MEETING_LLM_MODEL = "gpt-4.1-mini" }
+```
+
+把 `<dir>/skills/meeting-assistant` 复制到 `~/.codex/skills/`，Codex 会在你提到开会、会议纪要时自动按它的流程使用这些工具。
+
+### Claude Code
+
+```bash
+claude mcp add meeting-assistant --scope user \
+  -e MEETING_LLM_API_KEY=sk-... -e MEETING_LLM_MODEL=gpt-4.1-mini \
+  -- node <dir>/server/index.mjs
+mkdir -p ~/.claude/skills && cp -R <dir>/skills/meeting-assistant ~/.claude/skills/
+```
+
+### Cursor
+
+在 `~/.cursor/mcp.json`（全局）或项目的 `.cursor/mcp.json` 中加入：
+
+```json
+{
+  "mcpServers": {
+    "meeting-assistant": {
+      "command": "node",
+      "args": ["<dir>/server/index.mjs"],
+      "env": { "MEETING_LLM_API_KEY": "sk-...", "MEETING_LLM_MODEL": "gpt-4.1-mini" }
+    }
+  }
+}
+```
+
+工具自带说明，Cursor 无需额外配置即可使用；如需固定流程，可把 `skills/meeting-assistant/SKILL.md` 的内容加为项目规则。
+
+### 其他 MCP 客户端
+
+以 stdio 方式运行 `node <dir>/server/index.mjs`，按需传入下方环境变量即可。
+
+## 使用
+
+在 Agent 里直接说：
+
+- “开始开会，主题是 S5 版本排期” —— 开始录音并在浏览器打开会议页面
+- “刚才关于上线时间是怎么定的？” / “目前有哪些待办？” —— 基于白板和原话回答
+- “把白板换成方案对比” / “重新整理一下白板”
+- “暂停” / “继续” / “结束会议”
+- “生成会议纪要” / “导出这场会议”
+- “看一下昨天那场会的纪要”
+
+首次录音时，系统会请求麦克风权限（macOS 上授权给运行 Agent 的应用，例如终端、Cursor）。会议进行期间请保持 Agent 会话打开；会话关闭时会自动结束录音，并把已录内容转写完、保存好。
+
+## 配置
+
+| 环境变量 | 说明 | 默认 |
+|---|---|---|
+| `MEETING_LLM_API_KEY` | 整理模型的 API Key（也会读取 `OPENAI_API_KEY`） | — |
+| `MEETING_LLM_BASE_URL` | OpenAI 兼容接口地址，例如 `https://api.deepseek.com/v1`、`http://localhost:11434/v1` | `https://api.openai.com/v1` |
+| `MEETING_LLM_MODEL` | 整理与纪要使用的模型 | `gpt-4.1-mini` |
+| `MEETING_ASSISTANT_HOME` | 会议记录、白板与模型的存放目录 | `~/.meeting-assistant` |
+| `MEETING_OPEN_BROWSER` | 设为 `0` 时不自动打开浏览器，只返回页面地址 | `1` |
+
+识别模型、会议语言、简繁体、专有名词、静音过滤、分段时长、白板默认形式等，在会议页面右上角的设置中调整。
+
+## MCP 工具
+
+| 工具 | 作用 |
+|---|---|
+| `meeting_start` | 开始录音并打开会议页面 |
+| `meeting_control` | 暂停、继续、结束 |
+| `meeting_read` | 读取白板、整理结果、选中元素、字幕与纪要（支持分页与增量） |
+| `meeting_wait_changes` | 等待会议出现新内容，用于跟进会议 |
+| `meeting_set_layout` | 切换白板形式，或重新整理整场会议 |
+| `meeting_write_board` | 按要求修改白板（带版本校验，不覆盖人工改动） |
+| `meeting_minutes` | 生成或获取会议纪要；未配置模型时返回纪要规范，由 Agent 撰写 |
+| `meeting_save_minutes` | 保存 Agent 写好的纪要并导出 HTML |
+| `meeting_export` | 导出 Markdown 与 HTML 文件 |
+| `meeting_list` / `meeting_open` | 查看历史会议、重新打开会议页面 |
+
+## 隐私
+
+- 音频只在本机处理，转写完成后删除分段音频；识别失败的片段会保留音频以便重试。
+- 会议记录、白板和导出文件都保存在 `MEETING_ASSISTANT_HOME` 下。
+- 会议页面只监听 `127.0.0.1`，每场会议使用随机地址。
+- 只有配置了整理模型时，转写文字才会发送给该模型接口。
+
+## 第三方组件
+
+- [voxtype](https://github.com/peteonrails/voxtype)（MIT）—— macOS 版随包附带其官方发布的识别程序
+- [whisper.cpp](https://github.com/ggml-org/whisper.cpp)（MIT）—— Windows 版识别程序及识别模型
+- [Open Artifact](https://github.com/JimLiu/open-artifact)（Apache-2.0）—— 白板编辑器
+- [opencc-js](https://github.com/nk2028/opencc-js)（MIT、Apache-2.0）—— 简繁转换
+
+详见 [NOTICE.md](NOTICE.md)。
+
