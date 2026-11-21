@@ -25,9 +25,9 @@ import { transcriptLines } from "../server/minutes";
 import { BOARD_FORMS, setupText, type Snapshot } from "../shared";
 import type { Generate } from "../server/summary";
 import { wakePattern, type Assistant } from "../server/tasks";
-import { cliGenerate, cliSessions, pickRunner } from "./runner";
+import { cliGenerate, cliSessions, listModels, pickRunner, type ModelChoice } from "./runner";
 
-const VERSION = "1.4.0";
+const VERSION = "1.4.1";
 // stdout carries the protocol only; anything else a dependency prints goes to stderr.
 console.log = console.info = (...args: unknown[]) => console.error(...args);
 const env = process.env;
@@ -169,7 +169,21 @@ async function startPrimary(): Promise<Handlers> {
   }
   // The page speaks of the configured assistant; without a task runner the "AI 执行" tab explains why it is off.
   const ASSISTANT_TEXT = /\u5c0f\u4e5d\s?AI|AI 助手/g;
-  const browser = new MeetingBrowser(meetings, boards, here("../web/index.html"), id => boardErrors.get(id) ?? null, html => (runner ? html : html.replace("<body class=\"", "<body class=\"no-ai ")).replace(ASSISTANT_TEXT, assistantName));
+  // Models the organiser can use, for the page's proofreading setting: the configured endpoint's list, otherwise the agent CLI's.
+  let modelCache: { at: number; list: Promise<ModelChoice[]> } | null = null;
+  const readModels = async (): Promise<ModelChoice[]> => {
+    if (llmReady) {
+      const response = await fetch(llm.url.replace(/\/chat\/completions$/, "/models"), { signal: AbortSignal.timeout(8000), headers: llm.key ? { authorization: "Bearer " + llm.key } : {} });
+      const body = response.ok ? await response.json() as { data?: { id?: string }[] } : {};
+      return (body.data ?? []).filter(model => typeof model.id === "string").slice(0, 200).map(model => ({ id: model.id!, label: model.id!, isDefault: model.id === llm.model }));
+    }
+    return runner ? listModels(runner) : [];
+  };
+  const models = () => {
+    if (!modelCache || Date.now() - modelCache.at > 300000) { const list = readModels().catch(() => []); modelCache = { at: Date.now(), list }; void list.then(found => { if (!found.length) modelCache = null; }); }
+    return modelCache.list;
+  };
+  const browser = new MeetingBrowser(meetings, boards, here("../web/index.html"), id => boardErrors.get(id) ?? null, html => (runner ? html : html.replace("<body class=\"", "<body class=\"no-ai ")).replace(ASSISTANT_TEXT, assistantName), models);
 
   const openInBrowser = (url: string) => {
     if (env.MEETING_OPEN_BROWSER === "0") return false;

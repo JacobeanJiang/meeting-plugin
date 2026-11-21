@@ -2859,12 +2859,14 @@ import http from "node:http";
 import { randomBytes } from "node:crypto";
 import { readFile as readFile3 } from "node:fs/promises";
 var MeetingBrowser = class {
-  constructor(controller, boards, htmlFile, boardError = () => null, htmlTransform = (html) => html) {
+  /** models: the models the page's settings can offer for proofreading; empty means the model name is typed. */
+  constructor(controller, boards, htmlFile, boardError = () => null, htmlTransform = (html) => html, models = async () => []) {
     this.controller = controller;
     this.boards = boards;
     this.htmlFile = htmlFile;
     this.boardError = boardError;
     this.htmlTransform = htmlTransform;
+    this.models = models;
   }
   server = null;
   base = "";
@@ -2909,7 +2911,8 @@ var MeetingBrowser = class {
           }
           response.setHeader("Content-Type", "application/json;charset=utf-8");
           if (request.method === "GET" && match?.[2] === "api/settings") {
-            response.end(JSON.stringify({ settings: this.controller.snapshot().settings, environment: await this.controller.check() }));
+            const [environment, models] = await Promise.all([this.controller.check(), this.models().catch(() => [])]);
+            response.end(JSON.stringify({ settings: this.controller.snapshot().settings, environment, models }));
             return;
           }
           if (request.method === "GET" && match?.[2] === "api/meetings") {
@@ -3054,6 +3057,75 @@ function pickRunner(choice, find = locate) {
   }
   return null;
 }
+var CLAUDE_ALIASES = [{ id: "sonnet", label: "Sonnet", isDefault: false }, { id: "opus", label: "Opus", isDefault: false }, { id: "haiku", label: "Haiku", isDefault: false }];
+async function listModels(runner2, timeoutMs = 8e3, spawnFn = spawn2) {
+  if (runner2.name === "claude") return CLAUDE_ALIASES;
+  const env2 = { ...process.env, MEETING_ASSISTANT_TASK_RUN: "1" };
+  if (runner2.name === "cursor") {
+    const output = await new Promise((resolve) => {
+      const child = spawnFn(runner2.path, ["models"], { shell: windows && /\.(cmd|bat)$/i.test(runner2.path), stdio: ["ignore", "pipe", "ignore"], env: env2 });
+      let text = "";
+      const timer = setTimeout(() => child.kill(), timeoutMs);
+      child.stdout?.on("data", (chunk) => {
+        text += chunk;
+      });
+      child.on("error", () => {
+        clearTimeout(timer);
+        resolve("");
+      });
+      child.on("close", () => {
+        clearTimeout(timer);
+        resolve(text);
+      });
+    });
+    return output.split(/\r?\n/).map((line) => line.replace(/\x1b\[[0-9;]*m/g, "").trim()).map((line) => line.match(/^([a-z0-9][\w.:\/-]*)(?:\s+[-–—]\s+(.+?))?(\s+\(default\)|\s+\(current\))?$/i)).filter((match) => Boolean(match) && !/^(available|no|models?)$/i.test(match[1])).map((match) => ({ id: match[1], label: match[2] || match[1], isDefault: Boolean(match[3]) }));
+  }
+  return new Promise((resolve) => {
+    const child = spawnFn(runner2.path, ["app-server"], { shell: windows && /\.(cmd|bat)$/i.test(runner2.path), stdio: ["pipe", "pipe", "ignore"], env: env2 });
+    const models = [];
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      child.kill();
+      resolve(models);
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    const send2 = (message) => child.stdin?.write(JSON.stringify(message) + "\n");
+    let next = 1;
+    const page = (cursor) => send2({ id: ++next, method: "model/list", params: cursor ? { cursor } : {} });
+    child.stdout?.setEncoding("utf8");
+    let buffer = "";
+    child.stdout?.on("data", (chunk) => {
+      buffer += chunk;
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        let message;
+        try {
+          message = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (message.id === 1) {
+          if (message.error) return finish();
+          send2({ method: "initialized" });
+          page(null);
+          continue;
+        }
+        if (typeof message.id !== "number") continue;
+        if (message.error) return finish();
+        for (const model of message.result?.data ?? []) if (!model.hidden && (model.model || model.id)) models.push({ id: model.model || model.id, label: model.displayName || model.model || model.id, isDefault: Boolean(model.isDefault) });
+        if (message.result?.nextCursor && models.length < 200) page(message.result.nextCursor);
+        else finish();
+      }
+    });
+    child.on("error", finish);
+    child.on("close", finish);
+    send2({ id: 1, method: "initialize", params: { clientInfo: { name: "meeting-assistant", version: "1" } } });
+  });
+}
 function cliGenerate(runner2, cwd, timeoutMs = 15e4, spawnFn = spawn2) {
   const spec = SPECS[runner2.name];
   return ({ prompt, instructions: instructions3, model }) => new Promise((resolve, reject) => {
@@ -3147,7 +3219,7 @@ function cliSessions(runner2, cwd, spawnFn = spawn2) {
 }
 
 // src/mcp/server.ts
-var VERSION = "1.4.0";
+var VERSION = "1.4.1";
 console.log = console.info = (...args) => console.error(...args);
 var env = process.env;
 var home = path5.resolve(env.MEETING_ASSISTANT_HOME || path5.join(os4.homedir(), ".meeting-assistant"));
@@ -3342,7 +3414,26 @@ async function startPrimary() {
     if (JSON.stringify(next) !== JSON.stringify(settings)) await meetings.configure(next);
   }
   const ASSISTANT_TEXT = /\u5c0f\u4e5d\s?AI|AI 助手/g;
-  const browser = new MeetingBrowser(meetings, boards, here("../web/index.html"), (id2) => boardErrors.get(id2) ?? null, (html) => (runner ? html : html.replace('<body class="', '<body class="no-ai ')).replace(ASSISTANT_TEXT, assistantName));
+  let modelCache = null;
+  const readModels = async () => {
+    if (llmReady) {
+      const response = await fetch(llm.url.replace(/\/chat\/completions$/, "/models"), { signal: AbortSignal.timeout(8e3), headers: llm.key ? { authorization: "Bearer " + llm.key } : {} });
+      const body = response.ok ? await response.json() : {};
+      return (body.data ?? []).filter((model) => typeof model.id === "string").slice(0, 200).map((model) => ({ id: model.id, label: model.id, isDefault: model.id === llm.model }));
+    }
+    return runner ? listModels(runner) : [];
+  };
+  const models = () => {
+    if (!modelCache || Date.now() - modelCache.at > 3e5) {
+      const list = readModels().catch(() => []);
+      modelCache = { at: Date.now(), list };
+      void list.then((found) => {
+        if (!found.length) modelCache = null;
+      });
+    }
+    return modelCache.list;
+  };
+  const browser = new MeetingBrowser(meetings, boards, here("../web/index.html"), (id2) => boardErrors.get(id2) ?? null, (html) => (runner ? html : html.replace('<body class="', '<body class="no-ai ')).replace(ASSISTANT_TEXT, assistantName), models);
   const openInBrowser = (url) => {
     if (env.MEETING_OPEN_BROWSER === "0") return false;
     const [command, args] = windows2 ? ["cmd", ["/c", "start", "", url]] : process.platform === "darwin" ? ["open", [url]] : ["xdg-open", [url]];

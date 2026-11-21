@@ -9,7 +9,8 @@ export class MeetingBrowser {
   private tokens = new Map<string,string>();
   /** When each meeting's page last asked for its state; the page polls every second while it is open. */
   private seen = new Map<string,number>();
-  constructor(private readonly controller: MeetingController, private readonly boards: MeetingBoards, private readonly htmlFile: string, private readonly boardError: (id: string) => string | null = () => null, private readonly htmlTransform: (html: string) => string = html => html) {}
+  /** models: the models the page's settings can offer for proofreading; empty means the model name is typed. */
+  constructor(private readonly controller: MeetingController, private readonly boards: MeetingBoards, private readonly htmlFile: string, private readonly boardError: (id: string) => string | null = () => null, private readonly htmlTransform: (html: string) => string = html => html, private readonly models: () => Promise<{ id: string; label: string; isDefault: boolean }[]> = async () => []) {}
   /** Whether a meeting's page is open somewhere (polled within the last few seconds). */
   showing(id: string, withinMs = 6000): boolean { return Date.now() - (this.seen.get(id) ?? 0) <= withinMs; }
   async open(id: string): Promise<string> {
@@ -31,7 +32,7 @@ export class MeetingBrowser {
           response.end(this.htmlTransform(await readFile(this.htmlFile, "utf8"))); return;
         }
         response.setHeader("Content-Type","application/json;charset=utf-8");
-        if (request.method === "GET" && match?.[2] === "api/settings") { response.end(JSON.stringify({ settings: this.controller.snapshot().settings, environment: await this.controller.check() })); return; }
+        if (request.method === "GET" && match?.[2] === "api/settings") { const [environment, models] = await Promise.all([this.controller.check(), this.models().catch(() => [])]); response.end(JSON.stringify({ settings: this.controller.snapshot().settings, environment, models })); return; }
         if (request.method === "GET" && match?.[2] === "api/meetings") { const snapshot = this.controller.snapshot(); response.end(JSON.stringify({ current: snapshot.meeting?.id ?? null, viewing: meetingId, meetings: snapshot.history })); return; }
         if (request.method === "GET" && match?.[2] === "api/selection") { response.end(JSON.stringify(await this.boards.selection(meetingId))); return; }
         if (request.method === "GET" && match?.[2]) {

@@ -90,3 +90,23 @@ test('captions proofreading rules: corrections must stay about as long as what w
     async () => ({ text: '```json\n{"s1":"再对一下。","s9":"不该有"}\n```', model: 'm' }), null, 1000);
   assert.deepEqual(got, { s1: '再对一下。' }, 'only the ids asked for, fences tolerated');
 });
+
+test('the models the agent CLI offers are read from it: Codex over app-server (paged, hidden ones left out), Cursor from its list, Claude Code aliases', async () => {
+  const { listModels } = await load('src/mcp/runner.ts');
+  const dir = await mkdtemp('/tmp/meeting-models-');
+  try {
+    const codex = path.join(dir, 'codex');
+    await writeFile(codex, "#!/usr/bin/env node\nif(process.argv[2]!=='app-server')process.exit(2);require('readline').createInterface({input:process.stdin}).on('line',l=>{const m=JSON.parse(l);const say=r=>process.stdout.write(JSON.stringify({id:m.id,result:r})+'\\n');if(m.method==='initialize')say({});if(m.method==='model/list')say(m.params.cursor?{data:[{id:'m3',model:'m3',displayName:'M3',hidden:false,isDefault:false}],nextCursor:null}:{data:[{id:'m1',model:'m1',displayName:'模型一',hidden:false,isDefault:true},{id:'old',model:'old',displayName:'Old',hidden:true}],nextCursor:'c2'});});\n");
+    await chmod(codex, 0o755);
+    assert.deepEqual(await listModels({ name: 'codex', path: codex }), [{ id: 'm1', label: '模型一', isDefault: true }, { id: 'm3', label: 'M3', isDefault: false }]);
+    const cursor = path.join(dir, 'cursor-agent');
+    await writeFile(cursor, "#!/bin/sh\necho 'Available models'\necho ''\necho 'auto - Auto (default)'\necho 'gpt-5 - GPT-5'\necho 'sonnet-4.5 - Claude 4.5 Sonnet'\n");
+    await chmod(cursor, 0o755);
+    assert.deepEqual(await listModels({ name: 'cursor', path: cursor }), [{ id: 'auto', label: 'Auto', isDefault: true }, { id: 'gpt-5', label: 'GPT-5', isDefault: false }, { id: 'sonnet-4.5', label: 'Claude 4.5 Sonnet', isDefault: false }]);
+    await writeFile(cursor, "#!/bin/sh\necho 'No models available for this account.'\n");
+    assert.deepEqual(await listModels({ name: 'cursor', path: cursor }), [], 'nothing usable: the model name is typed instead');
+    assert.deepEqual((await listModels({ name: 'claude', path: '/none' })).map(model => model.id), ['sonnet', 'opus', 'haiku']);
+    const broken = path.join(dir, 'codex-broken'); await writeFile(broken, '#!/bin/sh\nsleep 5\n'); await chmod(broken, 0o755);
+    assert.deepEqual(await listModels({ name: 'codex', path: broken }, 300), [], 'no answer in time: empty');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

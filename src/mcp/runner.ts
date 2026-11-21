@@ -38,6 +38,54 @@ export function pickRunner(choice: string | undefined, find = locate): { name: R
   return null;
 }
 type Run = { child: ChildProcess; status: "running" | "completed" | "failed"; output: string; error: string };
+export type ModelChoice = { id: string; label: string; isDefault: boolean };
+/** Claude Code has no command that lists models; its --model accepts these documented aliases. */
+const CLAUDE_ALIASES: ModelChoice[] = [{ id: "sonnet", label: "Sonnet", isDefault: false }, { id: "opus", label: "Opus", isDefault: false }, { id: "haiku", label: "Haiku", isDefault: false }];
+/**
+ * The models the agent CLI on this computer can use with the person's own account and configuration: Codex answers model/list
+ * over its app-server protocol, Cursor prints them with "cursor-agent models", Claude Code offers its aliases. Empty when the
+ * list cannot be read; the settings then fall back to typing a model name.
+ */
+export async function listModels(runner: { name: RunnerName; path: string }, timeoutMs = 8000, spawnFn: typeof spawn = spawn): Promise<ModelChoice[]> {
+  if (runner.name === "claude") return CLAUDE_ALIASES;
+  const env = { ...process.env, MEETING_ASSISTANT_TASK_RUN: "1" };
+  if (runner.name === "cursor") {
+    const output = await new Promise<string>(resolve => {
+      const child = spawnFn(runner.path, ["models"], { shell: windows && /\.(cmd|bat)$/i.test(runner.path), stdio: ["ignore", "pipe", "ignore"], env });
+      let text = ""; const timer = setTimeout(() => child.kill(), timeoutMs);
+      child.stdout?.on("data", chunk => { text += chunk; });
+      child.on("error", () => { clearTimeout(timer); resolve(""); }); child.on("close", () => { clearTimeout(timer); resolve(text); });
+    });
+    // One model per line, "id - Display name"; headings, empty lines and notices have no plain id first.
+    return output.split(/\r?\n/).map(line => line.replace(/\x1b\[[0-9;]*m/g, "").trim()).map(line => line.match(/^([a-z0-9][\w.:\/-]*)(?:\s+[-–—]\s+(.+?))?(\s+\(default\)|\s+\(current\))?$/i)).filter((match): match is RegExpMatchArray => Boolean(match) && !/^(available|no|models?)$/i.test(match![1]))
+      .map(match => ({ id: match[1], label: match[2] || match[1], isDefault: Boolean(match[3]) }));
+  }
+  return new Promise(resolve => {
+    const child = spawnFn(runner.path, ["app-server"], { shell: windows && /\.(cmd|bat)$/i.test(runner.path), stdio: ["pipe", "pipe", "ignore"], env });
+    const models: ModelChoice[] = []; let done = false;
+    const finish = () => { if (done) return; done = true; clearTimeout(timer); child.kill(); resolve(models); };
+    const timer = setTimeout(finish, timeoutMs);
+    const send = (message: unknown) => child.stdin?.write(JSON.stringify(message) + "\n");
+    let next = 1;
+    const page = (cursor: string | null) => send({ id: ++next, method: "model/list", params: cursor ? { cursor } : {} });
+    child.stdout?.setEncoding("utf8");
+    let buffer = "";
+    child.stdout?.on("data", (chunk: string) => {
+      buffer += chunk; const lines = buffer.split("\n"); buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        let message: { id?: number; result?: { data?: { id?: string; model?: string; displayName?: string; hidden?: boolean; isDefault?: boolean }[]; nextCursor?: string | null }; error?: unknown };
+        try { message = JSON.parse(line); } catch { continue; }
+        if (message.id === 1) { if (message.error) return finish(); send({ method: "initialized" }); page(null); continue; }
+        if (typeof message.id !== "number") continue;
+        if (message.error) return finish();
+        for (const model of message.result?.data ?? []) if (!model.hidden && (model.model || model.id)) models.push({ id: model.model || model.id!, label: model.displayName || model.model || model.id!, isDefault: Boolean(model.isDefault) });
+        if (message.result?.nextCursor && models.length < 200) page(message.result.nextCursor); else finish();
+      }
+    });
+    child.on("error", finish); child.on("close", finish);
+    send({ id: 1, method: "initialize", params: { clientInfo: { name: "meeting-assistant", version: "1" } } });
+  });
+}
 /**
  * The agent CLI as the organising model, for people who have not configured an API key: one non-interactive, read-only run
  * per request that only answers with text. Runs are marked so the meeting server they load stays idle.

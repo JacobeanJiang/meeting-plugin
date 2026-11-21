@@ -202,6 +202,7 @@ body:not(.panel-open) .panel{display:none}
 .drawer label{display:block;margin:10px 0;font-size:13px;color:var(--ink-2)}
 .drawer select,.drawer textarea,.drawer input[type=text]{display:block;width:100%;margin-top:5px;padding:8px 10px;border-radius:9px;border:0;box-shadow:inset 0 0 0 1px var(--line-2);background:var(--surface);font:inherit;color:var(--ink)}
 .drawer select:focus,.drawer textarea:focus,.drawer input:focus{outline:2px solid var(--ink);outline-offset:0}
+.drawer [hidden]{display:none!important}
 .drawer small{display:block;margin-top:4px;font-size:11.5px;color:var(--muted)}
 .drawer .check{display:flex;gap:8px;align-items:flex-start}.drawer .check input{margin-top:3px;accent-color:var(--ink)}
 .drawer footer{display:flex;align-items:center;gap:10px;padding:12px 20px 16px;border-top:1px solid var(--line)}
@@ -283,7 +284,7 @@ body:not(.panel-open) .panel{display:none}
 <label>分段时长<select id="sChunk"><option value="10">10 秒</option><option value="15">15 秒</option><option value="30">30 秒</option></select><small>分段越长上下文越完整、越准，文字出现越慢。</small></label>
 <label class="check"><input type="checkbox" id="sClean"><span>自动清理识别噪音<small>去掉混入的日文假名、重复句和开头乱码</small></span></label>
 <label class="check"><input type="checkbox" id="sRewrite"><span>AI 校对字幕<small>结合上下文和专有名词改同音错字、补标点、去口头禅；字幕先显示识别结果，校对好后原位替换，原始识别随时可看。每段字幕会多调用一次模型。</small></span></label>
-<label>校对模型<input type="text" id="sRewriteModel" maxlength="256" placeholder="留空使用默认模型"><small>填写模型名可换用其他模型；留空时使用当前平台的默认模型。</small></label>
+<label>校对模型<select id="sRewritePick" hidden></select><input type="text" id="sRewriteModel" maxlength="256" placeholder="留空使用默认模型"><small id="sRewriteHint">填写模型名可换用其他模型；留空时使用当前平台的默认模型。</small></label>
 <h4>AI 整理</h4>
 <label class="check"><input type="checkbox" id="sAuto"><span>会议中自动整理<small>转写文字会发送给所配置的整理模型</small></span></label>
 <label class="check ai-setting"><input type="checkbox" id="sAiTasks"><span>会中 AI 执行<small>会上说“AI 助手，帮我……”时，AI 助手 在后台直接执行，结果显示在“AI 执行”里</small></span></label>
@@ -491,14 +492,21 @@ let ASR_HINT={'large-v3-turbo-q5_0':'推荐 · 574MB','large-v3-turbo':'更准 �
 async function openSettings(){try{const r=await fetch(new URL('api/settings',location.href),{cache:'no-store'});if(!r.ok)throw Error();const data=await r.json();current=data.settings;const env=data.environment||{};if(env.asrChoices)ASR_HINT=Object.fromEntries(env.asrChoices.map(c=>[c.name,c.label]));
   const sel=$('sAsr');sel.replaceChildren();const add=(v,t)=>{const o=document.createElement('option');o.value=v;o.textContent=t;sel.append(o)};add('','自动'+(env.defaultAsrModel?'（'+env.defaultAsrModel+'）':''));const have=env.asrModels||[];
   for(const name of new Set([...Object.keys(ASR_HINT),...have,...(current.asrModel?[current.asrModel]:[])]))add(name,name+(ASR_HINT[name]?' · '+ASR_HINT[name]:'')+(have.includes(name)?'（已安装）':'（选择后自动下载）'));
-  sel.value=current.asrModel||'';$('sLang').value=current.language;$('sScript').value=current.script;$('sVocab').value=current.vocabulary;$('sVad').value=current.vad;$('sChunk').value=String(current.chunkSecs);$('sClean').checked=current.cleanup;$('sAuto').checked=current.autoSummary;$('sAiTasks').checked=current.aiTasks!==false;$('sRewrite').checked=current.rewrite!==false;$('sRewriteModel').value=current.rewriteModel||'';$('sRewriteModel').disabled=!$('sRewrite').checked;$('sForm').value=current.defaultForm;syncScript();
+  sel.value=current.asrModel||'';$('sLang').value=current.language;$('sScript').value=current.script;$('sVocab').value=current.vocabulary;$('sVad').value=current.vad;$('sChunk').value=String(current.chunkSecs);$('sClean').checked=current.cleanup;$('sAuto').checked=current.autoSummary;$('sAiTasks').checked=current.aiTasks!==false;$('sRewrite').checked=current.rewrite!==false;$('sRewriteModel').value=current.rewriteModel||'';fillModels(data.models||[],current.rewriteModel);syncRewrite();$('sForm').value=current.defaultForm;syncScript();
   const live=latest&&latest.meeting&&['starting','recording','paused','stopping'].includes(latest.meeting.phase);$('sNote').textContent=live?'识别模型、语言、名词、静音和分段从下一场会议生效；其余立即生效':'保存后用于新会议';
   $('drawer').hidden=false;$('scrim').hidden=false}catch{dismissed='';toast('暂时读取不到设置，请稍后重试')}}
 function closeSettings(){$('drawer').hidden=true;$('scrim').hidden=true}
 function syncScript(){$('sScript').disabled=!['zh','auto'].includes($('sLang').value)}
-$('sLang').onchange=syncScript;$('sRewrite').onchange=()=>{$('sRewriteModel').disabled=!$('sRewrite').checked};$('gear').onclick=openSettings;$('drawerClose').onclick=closeSettings;$('scrim').onclick=closeSettings;
+$('sLang').onchange=syncScript;$('sRewrite').onchange=syncRewrite;$('sRewritePick').onchange=syncRewrite;
+// The models the agent platform offers (read from it); without a list, or for "手动填写", the model name is typed.
+function fillModels(list,chosen){const pick=$('sRewritePick');pick.replaceChildren();pick.hidden=!list.length;if(!list.length){$('sRewriteHint').textContent='没有读到可用模型列表，可填写模型名；留空时使用当前平台的默认模型。';return}
+  const add=(value,label)=>{const o=document.createElement('option');o.value=value;o.textContent=label;pick.append(o)};const preferred=list.find(m=>m.isDefault);
+  add('','默认'+(preferred?'（'+preferred.label+'）':'模型'));for(const m of list)add(m.id,m.label===m.id?m.id:m.label+' · '+m.id);add('__custom','手动填写…');
+  pick.value=!chosen?'':list.some(m=>m.id===chosen)?chosen:'__custom';$('sRewriteHint').textContent='列表来自当前平台；选“默认”使用平台的默认模型。'}
+function syncRewrite(){const on=$('sRewrite').checked,pick=$('sRewritePick'),custom=pick.hidden||pick.value==='__custom';pick.disabled=!on;$('sRewriteModel').hidden=!custom;$('sRewriteModel').disabled=!on}
+function chosenModel(){const pick=$('sRewritePick');return !pick.hidden&&pick.value!=='__custom'?(pick.value||null):($('sRewriteModel').value.trim()||null)}$('gear').onclick=openSettings;$('drawerClose').onclick=closeSettings;$('scrim').onclick=closeSettings;
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('drawer').hidden)closeSettings()});
-$('sSave').onclick=async()=>{if(!current)return;const next={...current,asrModel:$('sAsr').value||null,language:$('sLang').value,script:$('sScript').value,vocabulary:$('sVocab').value.trim(),vad:$('sVad').value,chunkSecs:Number($('sChunk').value),cleanup:$('sClean').checked,autoSummary:$('sAuto').checked,aiTasks:$('sAiTasks').checked,rewrite:$('sRewrite').checked,rewriteModel:$('sRewriteModel').value.trim()||null,defaultForm:$('sForm').value};
+$('sSave').onclick=async()=>{if(!current)return;const next={...current,asrModel:$('sAsr').value||null,language:$('sLang').value,script:$('sScript').value,vocabulary:$('sVocab').value.trim(),vad:$('sVad').value,chunkSecs:Number($('sChunk').value),cleanup:$('sClean').checked,autoSummary:$('sAuto').checked,aiTasks:$('sAiTasks').checked,rewrite:$('sRewrite').checked,rewriteModel:chosenModel(),defaultForm:$('sForm').value};
   $('sSave').disabled=true;try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'settings',settings:next})});if(!r.ok)throw Error();closeSettings()}catch{dismissed='';toast('设置没有保存成功，请重试')}finally{$('sSave').disabled=false}};
 let polling=false;setInterval(async()=>{if(!polling){polling=true;await refresh();polling=false}},1000);refresh();
 // ---- board size ----
