@@ -7,7 +7,11 @@ export class MeetingBrowser {
   private server: Server | null = null;
   private base = "";
   private tokens = new Map<string,string>();
+  /** When each meeting's page last asked for its state; the page polls every second while it is open. */
+  private seen = new Map<string,number>();
   constructor(private readonly controller: MeetingController, private readonly boards: MeetingBoards, private readonly htmlFile: string, private readonly boardError: (id: string) => string | null = () => null, private readonly htmlTransform: (html: string) => string = html => html) {}
+  /** Whether a meeting's page is open somewhere (polled within the last few seconds). */
+  showing(id: string, withinMs = 6000): boolean { return Date.now() - (this.seen.get(id) ?? 0) <= withinMs; }
   async open(id: string): Promise<string> {
     if (!this.server) {
       const server = http.createServer((request,response) => { void (async () => {
@@ -31,6 +35,7 @@ export class MeetingBrowser {
         if (request.method === "GET" && match?.[2] === "api/meetings") { const snapshot = this.controller.snapshot(); response.end(JSON.stringify({ current: snapshot.meeting?.id ?? null, viewing: meetingId, meetings: snapshot.history })); return; }
         if (request.method === "GET" && match?.[2] === "api/selection") { response.end(JSON.stringify(await this.boards.selection(meetingId))); return; }
         if (request.method === "GET" && match?.[2]) {
+          this.seen.set(meetingId, Date.now());
           const snapshot = this.controller.view(meetingId);
           const boardUrl = await this.boards.open(meetingId,snapshot.meeting!.title);
           // Content on the board besides the title, including what the conversation wrote there: the page stops showing "listening" once there is any.
@@ -47,6 +52,12 @@ export class MeetingBrowser {
           // A new meeting or another record: the page navigates to that meeting's own address.
           if (body.action === "new") { const { snapshot } = await this.controller.newMeeting(String((body as { title?: unknown }).title ?? "").slice(0, 200)); response.end(JSON.stringify({ ok: true, url: await this.open(snapshot.meeting!.id) })); return; }
           if (body.action === "switch") { const id = String((body as { id?: unknown }).id ?? ""); await this.controller.switchTo(id); response.end(JSON.stringify({ ok: true, url: await this.open(id) })); return; }
+          // Minutes can be written for any meeting this page shows, including past ones.
+          if (body.action === "minutes") {
+            try { this.controller.requestMinutes(meetingId); response.end(JSON.stringify({ ok: true })); }
+            catch (error) { response.writeHead(400); response.end(JSON.stringify({ error: error instanceof Error ? error.message : "纪要没有生成" })); }
+            return;
+          }
           if (this.controller.snapshot().meeting?.id !== meetingId) throw Error("此页面不是当前录音会议，请回到对应会话");
           if (body.action === "summarize") this.controller.summarizeNow();
           else if (body.action === "retry") await this.controller.retry();

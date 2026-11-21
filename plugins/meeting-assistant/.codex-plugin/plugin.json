@@ -1,6 +1,6 @@
 {
   "name": "meeting-assistant",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Record meetings from the microphone with local transcription, a live self-organising board, Q&A about what was said, work handed to the agent during the meeting, and structured minutes. (macOS)",
   "author": {
     "name": "JacobeanJiang",

@@ -79,6 +79,15 @@ body.no-ai .ai-setting,body.no-ai .pop{display:none!important}
 body.tab-ai .feed,body.tab-ai .cite,body.tab-ai .jump,body.tab-ai #summary{display:none!important}
 .ailist{flex:1;min-height:0;overflow:auto;padding:4px 12px 16px;display:none}
 body.tab-ai .ailist{display:block}
+body.tab-minutes .feed,body.tab-minutes .cite,body.tab-minutes .jump,body.tab-minutes #summary,body.tab-minutes .ailist{display:none!important}
+.minutes{flex:1;min-height:0;overflow:auto;padding:4px 16px 16px;display:none}
+body.tab-minutes .minutes{display:block}
+.minutes .md{margin-top:0;padding-top:0;border-top:0;font-size:13.5px}
+.minutes .md h1{font-size:16px}.minutes .md h2,.minutes .md h3{font-size:14px;margin-top:14px}
+.minutes-bar{display:flex;align-items:center;gap:8px;padding:6px 0 10px;font-size:12px;color:var(--muted)}
+.minutes-bar span{flex:1}
+.minutes button.make{height:30px;padding:0 12px;border-radius:8px;background:var(--ink);color:#fff;font-size:12.5px;margin-top:10px}
+.minutes-bar button{height:26px;padding:0 9px;border-radius:7px;font-size:12px;box-shadow:inset 0 0 0 1px var(--line-2)}
 .task{margin:8px 0;padding:12px 13px;border-radius:14px;background:var(--surface);box-shadow:0 0 0 1px var(--line);animation:pop .2s var(--ease) both}
 .task.still{animation:none}
 .task.fresh{box-shadow:0 0 0 2px var(--ink)}
@@ -160,6 +169,7 @@ body:not(.panel-open) .panel{display:none}
 .panel-foot{display:flex;align-items:center;gap:8px;padding:10px 16px 12px;border-top:1px solid var(--line);font-size:11.5px;color:var(--muted)}
 .panel-foot span{flex:1}
 .retry{color:var(--warn);font-weight:600;font-size:12px}
+.rawtoggle{height:22px;padding:0 8px;border-radius:6px;font-size:11.5px;color:var(--ink-2);box-shadow:inset 0 0 0 1px var(--line-2)}.rawtoggle[aria-pressed=true]{background:var(--ink);color:#fff;box-shadow:none}.rawtoggle[hidden]{display:none}
 .retry[hidden]{display:none}
 
 /* toast */
@@ -272,6 +282,8 @@ body:not(.panel-open) .panel{display:none}
 <label>静音过滤<select id="sVad"><option value="strict">严格：嘈杂环境，少录杂音</option><option value="standard">标准</option><option value="loose">宽松：说话小声或离麦克风远</option></select></label>
 <label>分段时长<select id="sChunk"><option value="10">10 秒</option><option value="15">15 秒</option><option value="30">30 秒</option></select><small>分段越长上下文越完整、越准，文字出现越慢。</small></label>
 <label class="check"><input type="checkbox" id="sClean"><span>自动清理识别噪音<small>去掉混入的日文假名、重复句和开头乱码</small></span></label>
+<label class="check"><input type="checkbox" id="sRewrite"><span>AI 校对字幕<small>结合上下文和专有名词改同音错字、补标点、去口头禅；字幕先显示识别结果，校对好后原位替换，原始识别随时可看。每段字幕会多调用一次模型。</small></span></label>
+<label>校对模型<input type="text" id="sRewriteModel" maxlength="256" placeholder="留空使用默认模型"><small>填写模型名可换用其他模型；留空时使用当前平台的默认模型。</small></label>
 <h4>AI 整理</h4>
 <label class="check"><input type="checkbox" id="sAuto"><span>会议中自动整理<small>转写文字会发送给所配置的整理模型</small></span></label>
 <label class="check ai-setting"><input type="checkbox" id="sAiTasks"><span>会中 AI 执行<small>会上说“AI 助手，帮我……”时，AI 助手 在后台直接执行，结果显示在“AI 执行”里</small></span></label>
@@ -290,13 +302,14 @@ body:not(.panel-open) .panel{display:none}
     <div class="pop" id="pop" hidden role="status"><div class="who"><b>AI 助手</b><span id="popState"></span></div><h4 id="popTitle"></h4><div class="md" id="popBody" hidden></div><div class="acts"><button class="primary" id="popView">查看</button><button id="popClose">关闭</button></div></div>
   </section>
   <aside class="panel" aria-label="实时字幕与 AI 执行">
-    <div class="panel-head"><div class="tabs" role="tablist"><button class="tab on" role="tab" data-tab="feed" aria-selected="true">实时字幕</button><button class="tab" role="tab" data-tab="ai" aria-selected="false">AI 执行<em id="aiCount" hidden></em></button></div><span class="spacer"></span>
+    <div class="panel-head"><div class="tabs" role="tablist"><button class="tab on" role="tab" data-tab="feed" aria-selected="true">实时字幕</button><button class="tab" role="tab" data-tab="minutes" aria-selected="false">纪要</button><button class="tab" role="tab" data-tab="ai" aria-selected="false">AI 执行<em id="aiCount" hidden></em></button></div><span class="spacer"></span>
       <button class="ghost" id="summary" title="让 AI 立即整理最新内容"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M8 0c.4 3.6 2.4 5.6 8 8-5.6 2.4-7.6 4.4-8 8-.4-3.6-2.4-5.6-8-8 5.6-2.4 7.6-4.4 8-8Z" fill="currentColor"/></svg>立即整理</button></div>
     <div class="cite" id="cite" hidden><span><b id="citeTitle"></b><em id="citeText"></em></span><button id="citeClose" aria-label="取消定位"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 2l6 6M8 2 2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
     <div class="feed" id="feed" aria-live="polite"></div>
     <div class="ailist" id="ailist" aria-live="polite"></div>
+    <div class="minutes" id="minutes"></div>
     <button class="jump" id="jump" hidden>回到最新 ↓</button>
-    <div class="panel-foot"><span id="foot">白板可直接编辑，改动实时保存</span><button class="retry" id="retry" hidden>重试失败片段</button></div>
+    <div class="panel-foot"><span id="foot">白板可直接编辑，改动实时保存</span><button class="rawtoggle" id="rawToggle" hidden aria-pressed="false" title="字幕已由 AI 校对，点此查看语音识别的原文">原始识别</button><button class="retry" id="retry" hidden>重试失败片段</button></div>
   </aside>
 </main>
 <script>
@@ -342,7 +355,7 @@ function render(data){
   if(loaded!==data.boardUrl){$('board').src=data.boardUrl;loaded=data.boardUrl}
   else if(data.boardSpace&&boardSpace&&data.boardSpace!==boardSpace)setTimeout(fitBoard,1200); // redrawn for a different screen size: fit once the new layout is in
   if(data.boardSpace)boardSpace=data.boardSpace;
-  renderFeed(m,latest.pending);renderTasks(m);
+  renderFeed(m,latest.pending);renderTasks(m);renderMinutes(m);
   const failed=m.segments.filter(s=>s.status==='failed').length;$('retry').hidden=!failed;$('retry').textContent='重试 '+failed+' 段失败';$('retry').disabled=busy||live;
   $('foot').textContent=done.length?done.length+' 段发言 · 白板可直接编辑，改动实时保存':'白板可直接编辑，改动实时保存';
   toast(data.boardError||m.error||m.summaryError||'');
@@ -354,7 +367,8 @@ function renderFeed(m,pending){
   let added=false;
   for(const s of shown){let node=rendered.get(s.id);
     if(!node){node=document.createElement('div');node.className='line';const t=document.createElement('time');t.className='num';const no=document.createElement('span');no.className='no num';node.append(t,no,document.createElement('p'));node.dataset.id=s.id;rendered.set(s.id,node);added=true}
-    node.querySelector('time').textContent=time(s.startMs);node.querySelector('.no').textContent='#'+(s.seq+1);node.classList.toggle('chatter',s.tag==='chatter');node.classList.toggle('cited',cited.has(s.id));node.querySelector('p').textContent=s.status==='done'?s.text:'这段没有识别成功，录音已保留，会后可重试';node.classList.toggle('failed',s.status==='failed');}
+    node.querySelector('time').textContent=time(s.startMs);node.querySelector('.no').textContent='#'+(s.seq+1);node.classList.toggle('chatter',s.tag==='chatter');node.classList.toggle('cited',cited.has(s.id));const p=node.querySelector('p');p.textContent=s.status==='done'?(showRaw&&s.raw?s.raw:s.text):'这段没有识别成功，录音已保留，会后可重试';p.title=s.raw?(showRaw?'AI 校对后：'+s.text:'原始识别：'+s.raw):'';node.classList.toggle('failed',s.status==='failed');}
+  $('rawToggle').hidden=!shown.some(s=>s.raw);
   const ordered=shown.map(s=>rendered.get(s.id));ordered.forEach((node,i)=>{node.classList.toggle('now',i===ordered.length-1&&s_live(m));if(feed.children[i]!==node)feed.insertBefore(node,feed.children[i]||null)});
   let pend=$('pendingRow');if(!pend){pend=document.createElement('div');pend.id='pendingRow';pend.className='pending';pend.innerHTML='<span class="dots"><i></i><i></i><i></i></span><span></span>'}
   pend.hidden=!pending;pend.lastChild.textContent='正在识别'+(pending>1?' '+pending+' 段':'');feed.append(pend);
@@ -362,6 +376,8 @@ function renderFeed(m,pending){
   if(added){if(stick||nearBottom){feed.scrollTop=feed.scrollHeight;$('jump').hidden=true}else $('jump').hidden=false}
 }
 const s_live=m=>['starting','recording','paused','stopping'].includes(m.phase);
+let showRaw=false;
+$('rawToggle').onclick=()=>{showRaw=!showRaw;$('rawToggle').setAttribute('aria-pressed',String(showRaw));if(latest&&latest.meeting)renderFeed(latest.meeting,latest.pending)};
 $('feed').addEventListener('scroll',()=>{const f=$('feed');stick=f.scrollHeight-f.scrollTop-f.clientHeight<80;if(stick)$('jump').hidden=true});
 $('jump').onclick=()=>{const f=$('feed');f.scrollTop=f.scrollHeight;stick=true;$('jump').hidden=true};
 async function refresh(){try{const r=await fetch(base,{cache:'no-store'});if(!r.ok)throw Error();render(await r.json())}catch{toast('会议服务连接中断。已有记录保存在会议助手内，请回到会话重新打开白板。')}}
@@ -405,7 +421,7 @@ function markdown(src){const lines=String(src||'').replace(/\r/g,'').split('\n')
   if(code!==null)out.push('<pre><code>'+code.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</code></pre>');close();return out.join('')}
 const TASK_ST={queued:'排队中',running:'执行中',done:'已完成',failed:'没完成'};
 let tab='feed',seenTasks=null,unread=new Set(),popTask='',popTimer=0;
-function setTab(name){tab=name;document.body.classList.toggle('tab-ai',name==='ai');for(const b of document.querySelectorAll('.tab')){const on=b.dataset.tab===name;b.classList.toggle('on',on);b.setAttribute('aria-selected',String(on))}
+function setTab(name){tab=name;document.body.classList.toggle('tab-ai',name==='ai');document.body.classList.toggle('tab-minutes',name==='minutes');for(const b of document.querySelectorAll('.tab')){const on=b.dataset.tab===name;b.classList.toggle('on',on);b.setAttribute('aria-selected',String(on))}
   if(name==='ai'){unread.clear();paintCount()}if(!document.body.classList.contains('panel-open')){document.body.classList.add('panel-open');$('toggle').setAttribute('aria-pressed','true')}}
 for(const b of document.querySelectorAll('.tab'))b.onclick=()=>setTab(b.dataset.tab);
 function paintCount(){const n=unread.size;$('aiCount').hidden=!n;$('aiCount').textContent=String(n)}
@@ -438,6 +454,16 @@ function renderTasks(m){const tasks=m.aiTasks||[];const box=$('ailist');
     if(t.result){const md=document.createElement('div');md.className='md';md.innerHTML=markdown(t.result);card.append(md)}
     if(t.error){const e=document.createElement('div');e.className='err';e.textContent=t.error;card.append(e)}
     box.append(card)}}
+// ---- 纪要 ----
+// The whole-meeting minutes (product minutes specification), written in the background; shown here so the meeting page in the
+// conversation's right panel has everything the plugin page has.
+let minutesError='';
+function renderMinutes(m){const box=$('minutes');const mi=m.minutes;const key=JSON.stringify([m.id,mi&&mi.state,mi&&mi.at,mi&&mi.error,s_live(m),minutesError]);if(box.dataset.key===key)return;box.dataset.key=key;box.replaceChildren();
+  const make=label=>{const b=document.createElement('button');b.className='make';b.textContent=label;b.onclick=makeMinutes;return b};
+  if(mi&&mi.state==='working'){const e=document.createElement('div');e.className='ai-empty';e.innerHTML='<b>正在生成纪要</b>按纪要规范整理整场会议，长会议需要一两分钟。';box.append(e);return}
+  if(mi&&mi.markdown){const bar=document.createElement('div');bar.className='minutes-bar';const t=document.createElement('span');t.textContent=(mi.at?'生成于 '+new Date(mi.at).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}):'')+(s_live(m)?' · 会议仍在进行，可稍后重新生成':'');const again=document.createElement('button');again.textContent='重新生成';again.onclick=makeMinutes;bar.append(t,again);const md=document.createElement('div');md.className='md';md.innerHTML=markdown(mi.markdown);box.append(bar,md);if(mi.state==='failed'&&mi.error){const e=document.createElement('div');e.className='err';e.textContent=mi.error;box.append(e)}return}
+  const e=document.createElement('div');e.className='ai-empty';const b=document.createElement('b');b.textContent=mi&&mi.state==='failed'?'纪要没有生成':'还没有会议纪要';e.append(b,document.createTextNode(mi&&mi.state==='failed'?(mi.error||'请重试'):s_live(m)?'会议结束后会自动生成，也可以现在先生成一版。':'按纪要规范整理会议概览、核心方向、关键决策和待办。'));e.append(make(mi&&mi.state==='failed'?'重新生成':'生成纪要'));if(minutesError){const x=document.createElement('div');x.className='err';x.textContent=minutesError;e.append(x)}box.append(e)}
+async function makeMinutes(){busy=true;minutesError='';try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'minutes'})});if(!r.ok){const j=await r.json().catch(()=>({}));throw Error(j.error||'纪要没有生成，请重试')}}catch(e){minutesError=e.message}finally{busy=false;await refresh()}}
 $('stop').onclick=()=>post({action:'stop'});$('summary').onclick=()=>post({action:'summarize'});$('retry').onclick=()=>post({action:'retry'});
 $('toggle').onclick=()=>{const open=document.body.classList.toggle('panel-open');$('toggle').setAttribute('aria-pressed',String(open))};
 if(matchMedia('(max-width:900px)').matches){document.body.classList.remove('panel-open');$('toggle').setAttribute('aria-pressed','false')}
@@ -465,14 +491,14 @@ let ASR_HINT={'large-v3-turbo-q5_0':'推荐 · 574MB','large-v3-turbo':'更准 �
 async function openSettings(){try{const r=await fetch(new URL('api/settings',location.href),{cache:'no-store'});if(!r.ok)throw Error();const data=await r.json();current=data.settings;const env=data.environment||{};if(env.asrChoices)ASR_HINT=Object.fromEntries(env.asrChoices.map(c=>[c.name,c.label]));
   const sel=$('sAsr');sel.replaceChildren();const add=(v,t)=>{const o=document.createElement('option');o.value=v;o.textContent=t;sel.append(o)};add('','自动'+(env.defaultAsrModel?'（'+env.defaultAsrModel+'）':''));const have=env.asrModels||[];
   for(const name of new Set([...Object.keys(ASR_HINT),...have,...(current.asrModel?[current.asrModel]:[])]))add(name,name+(ASR_HINT[name]?' · '+ASR_HINT[name]:'')+(have.includes(name)?'（已安装）':'（选择后自动下载）'));
-  sel.value=current.asrModel||'';$('sLang').value=current.language;$('sScript').value=current.script;$('sVocab').value=current.vocabulary;$('sVad').value=current.vad;$('sChunk').value=String(current.chunkSecs);$('sClean').checked=current.cleanup;$('sAuto').checked=current.autoSummary;$('sAiTasks').checked=current.aiTasks!==false;$('sForm').value=current.defaultForm;syncScript();
+  sel.value=current.asrModel||'';$('sLang').value=current.language;$('sScript').value=current.script;$('sVocab').value=current.vocabulary;$('sVad').value=current.vad;$('sChunk').value=String(current.chunkSecs);$('sClean').checked=current.cleanup;$('sAuto').checked=current.autoSummary;$('sAiTasks').checked=current.aiTasks!==false;$('sRewrite').checked=current.rewrite!==false;$('sRewriteModel').value=current.rewriteModel||'';$('sRewriteModel').disabled=!$('sRewrite').checked;$('sForm').value=current.defaultForm;syncScript();
   const live=latest&&latest.meeting&&['starting','recording','paused','stopping'].includes(latest.meeting.phase);$('sNote').textContent=live?'识别模型、语言、名词、静音和分段从下一场会议生效；其余立即生效':'保存后用于新会议';
   $('drawer').hidden=false;$('scrim').hidden=false}catch{dismissed='';toast('暂时读取不到设置，请稍后重试')}}
 function closeSettings(){$('drawer').hidden=true;$('scrim').hidden=true}
 function syncScript(){$('sScript').disabled=!['zh','auto'].includes($('sLang').value)}
-$('sLang').onchange=syncScript;$('gear').onclick=openSettings;$('drawerClose').onclick=closeSettings;$('scrim').onclick=closeSettings;
+$('sLang').onchange=syncScript;$('sRewrite').onchange=()=>{$('sRewriteModel').disabled=!$('sRewrite').checked};$('gear').onclick=openSettings;$('drawerClose').onclick=closeSettings;$('scrim').onclick=closeSettings;
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('drawer').hidden)closeSettings()});
-$('sSave').onclick=async()=>{if(!current)return;const next={...current,asrModel:$('sAsr').value||null,language:$('sLang').value,script:$('sScript').value,vocabulary:$('sVocab').value.trim(),vad:$('sVad').value,chunkSecs:Number($('sChunk').value),cleanup:$('sClean').checked,autoSummary:$('sAuto').checked,aiTasks:$('sAiTasks').checked,defaultForm:$('sForm').value};
+$('sSave').onclick=async()=>{if(!current)return;const next={...current,asrModel:$('sAsr').value||null,language:$('sLang').value,script:$('sScript').value,vocabulary:$('sVocab').value.trim(),vad:$('sVad').value,chunkSecs:Number($('sChunk').value),cleanup:$('sClean').checked,autoSummary:$('sAuto').checked,aiTasks:$('sAiTasks').checked,rewrite:$('sRewrite').checked,rewriteModel:$('sRewriteModel').value.trim()||null,defaultForm:$('sForm').value};
   $('sSave').disabled=true;try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'settings',settings:next})});if(!r.ok)throw Error();closeSettings()}catch{dismissed='';toast('设置没有保存成功，请重试')}finally{$('sSave').disabled=false}};
 let polling=false;setInterval(async()=>{if(!polling){polling=true;await refresh();polling=false}},1000);refresh();
 // ---- board size ----

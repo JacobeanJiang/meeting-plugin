@@ -69,8 +69,24 @@ test('without an API key the agent CLI organises: a read-only run whose final an
     assert.ok(!seen.args.some(arg => /dangerously/.test(arg)), 'and never skips approvals');
     assert.equal(seen.child, '1', 'the run is marked so the meeting server it loads stays idle');
     assert.match(seen.prompt, /白板规则[\s\S]*"mode":"append"[\s\S]*不要调用任何工具/);
+    await generate({ instructions: '校对', prompt: '{}', model: 'gpt-x' });
+    const chosen = JSON.parse(await readFile(fake + '.seen', 'utf8')).args;
+    assert.deepEqual(chosen.slice(chosen.indexOf('-m'), chosen.indexOf('-m') + 2), ['-m', 'gpt-x'], 'a chosen model is passed to the CLI');
+    assert.ok(chosen.indexOf('-m') < chosen.indexOf('-'), 'before the stdin marker');
     await assert.rejects(generate({ instructions: 'FAIL', prompt: '{}' }), /整理失败/);
     const slow = path.join(dir, 'claude'); await writeFile(slow, '#!/bin/sh\nsleep 5\n'); await chmod(slow, 0o755);
     await assert.rejects(cliGenerate({ name: 'claude', path: slow }, dir, 300)({ instructions: 'x', prompt: '{}' }), /超时/);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('captions proofreading rules: corrections must stay about as long as what was said', async () => {
+  const { acceptRewrite, rewriteSegments } = await load('src/server/rewrite.ts');
+  assert.ok(acceptRewrite('我们下周一在对一下排期', '我们下周一再对一下排期。'));
+  assert.ok(acceptRewrite('嗯那个就是我们先做搜索框吧搜索框', '我们先做搜索框吧。'), 'fillers and repeats may go');
+  assert.ok(!acceptRewrite('先做搜索框', ''), 'empty is rejected');
+  assert.ok(!acceptRewrite('我们下周一再对一下排期，测试资源也要确认', '好的'), 'too short');
+  assert.ok(!acceptRewrite('先做搜索框', '先做搜索框，另外推荐位放到第二期，交互稿周五前出，埋点下周对齐'), 'invented content');
+  const got = await rewriteSegments({ title: '评审', vocabulary: '', language: 'zh', context: [], items: [{ id: 's1', text: '在对一下' }] },
+    async () => ({ text: '```json\n{"s1":"再对一下。","s9":"不该有"}\n```', model: 'm' }), null, 1000);
+  assert.deepEqual(got, { s1: '再对一下。' }, 'only the ids asked for, fences tolerated');
 });

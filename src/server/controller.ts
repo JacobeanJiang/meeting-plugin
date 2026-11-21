@@ -4,6 +4,7 @@ import { access, chmod, mkdir, readFile, readdir, rename, rm, writeFile } from "
 import { constants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { REWRITE_BATCH, acceptRewrite, rewriteSegments } from "./rewrite";
 import { asrChoicesFor, type AiTask, BOARD_FORMS, DEFAULT_SETTINGS, DEFAULT_TOPIC, FORM_LABEL, markdown, type BoardForm, type BoardSpace, type Settings, type Meeting, type Snapshot, type Environment, type Segment } from "../shared";
 import { RETRY_PROMPT, VAD, asrConfig, asrPrompt, polishTranscript } from "./asr";
 import * as OpenCC from "opencc-js";
@@ -51,6 +52,8 @@ export type Deps = {
   organiseEveryMs?: number;
   /** Longest wait for one organising or minutes request (defaults 45 s and 60 s). */
   organiseTimeoutMs?: number;
+  /** Longest wait for one caption proofreading request (default 20 s, within the desktop host's limit per model call). */
+  rewriteTimeoutMs?: number;
   /** Chinese script conversion; defaults to the bundled recorder in text mode. */
   convert?: (text: string, to: "Hans" | "Hant") => Promise<string>;
 };
@@ -152,7 +155,7 @@ export class MeetingController {
         record.asrModel ||= "large-v3-turbo";
         record.notes = Array.isArray(record.notes) ? record.notes.map(note => ({ ...note, topic: note.topic || DEFAULT_TOPIC })) : [];
         // Older meetings: segments gain the chatter tag, plans a centre, and organised notes become board entries in the same groups.
-        for (const segment of record.segments) segment.tag ??= null;
+        for (const segment of record.segments) { segment.tag ??= null; segment.raw ??= null; if (segment.rewrite === "pending" || segment.rewrite === undefined) segment.rewrite = null; }
         if (record.plan === undefined) record.plan = record.notes.length ? { theme: "", center: "", type: "other", form: "topics", reason: "沿用旧版议题整理", decidedAt: record.summaryAt ?? record.startedAt, lockedBy: "model", pendingForm: null, pendingCount: 0 } : null;
         if (record.plan) record.plan.center ??= record.plan.theme.slice(0, 16);
         if (!Array.isArray(record.items)) record.items = itemsFromNotes(record.notes, record.summaryAt ?? record.startedAt);
@@ -209,7 +212,8 @@ export class MeetingController {
       asrModel: typeof r.asrModel === "string" && /^[\w.-]{1,64}$/.test(r.asrModel) ? r.asrModel : null,
       language: pick(r.language, ["zh", "en", "ja", "ko", "auto"] as const, "zh"), script: pick(r.script, ["simplified", "traditional", "original"] as const, "simplified"),
       vocabulary: typeof r.vocabulary === "string" ? r.vocabulary.slice(0, 500) : "", vad: pick(r.vad, ["strict", "standard", "loose"] as const, "standard"), cleanup: r.cleanup !== false,
-      defaultForm: (r.defaultForm === "auto" ? "mindmap" : pick(r.defaultForm, ["topics", "mindmap", "flow", "matrix", "status"] as const, "mindmap")), aiTasks: r.aiTasks !== false };
+      defaultForm: (r.defaultForm === "auto" ? "mindmap" : pick(r.defaultForm, ["topics", "mindmap", "flow", "matrix", "status"] as const, "mindmap")), aiTasks: r.aiTasks !== false,
+      rewrite: r.rewrite !== false, rewriteModel: typeof r.rewriteModel === "string" && r.rewriteModel.trim() ? r.rewriteModel.trim().slice(0, 256) : null };
   }
 
   private publicMeeting(record: Stored): Meeting { const { audioFiles: _files, sessionDir: _dir, asrModel: _model, ...value } = record; return value; }
@@ -369,7 +373,7 @@ export class MeetingController {
       if (record.segments.length >= 700) { this.recorder?.write("stop"); record.phase = "stopping"; record.error = "本次会议已达到初版分段上限，请处理完成后开启下一场"; return; }
       const seq = Number(value.seq); if (record.segments.some(segment => segment.seq === seq)) return;
       const silent = Number(value.endMs) - Number(value.startMs) < 500 || typeof value.rms === "number" && value.rms < 0.003 || typeof value.voicedMs === "number" && value.voicedMs < 100;
-      const segment: Segment = { id: "s" + seq, seq, startMs: Number(value.startMs), endMs: Number(value.endMs), status: silent ? "empty" : "pending", text: "", error: null, tag: null };
+      const segment: Segment = { id: "s" + seq, seq, startMs: Number(value.startMs), endMs: Number(value.endMs), status: silent ? "empty" : "pending", text: "", error: null, tag: null, raw: null, rewrite: null };
       record.segments.push(segment); record.segments.sort((a, b) => a.seq - b.seq);
       const file = path.join(record.sessionDir, value.name);
       if (silent) await rm(file, { force: true }); else record.audioFiles[segment.id] = file;
@@ -452,10 +456,11 @@ export class MeetingController {
           const text = isNoiseTranscript(polished) ? "" : polished;
           if (this.disposed) break;
           if (text.length > 35000) throw Error("转写过长，保留原音频供重试");
-          segment.text = text; segment.status = text ? "done" : "empty"; segment.error = null;
+          segment.text = text; segment.status = text ? "done" : "empty"; segment.error = null; segment.raw = null; segment.rewrite = text && this.settings.rewrite ? "pending" : null;
           await this.persist(record); // Preserve text before deleting source audio.
           await rm(file, { force: true }); delete record.audioFiles[segment.id];
           this.deps.log("segment_completed", { count: text.length, success: true });
+          if (segment.rewrite === "pending") this.proofread(record);
           // Organise at most every 40 s: a little more speech per round gives the model clearer topics (DingTalk refreshes its viewpoint tree about once a minute).
           if (text && this.settings.autoSummary && Date.now() - (record.summaryAt ?? 0) >= (this.deps.organiseEveryMs ?? 40000)) void this.doSummary(false).catch(() => undefined);
           // A request to AI 助手 may be split across two segments, so the previous one is checked together with this one.
@@ -473,6 +478,40 @@ export class MeetingController {
       if (this.settings.autoSummary) { void this.doSummary(false).catch(() => undefined); try { this.requestMinutes(this.current.id); } catch { /* nothing transcribed */ } }
     }
   }
+  /** Proofreads waiting captions one batch at a time per meeting; the recognised text shows until the correction arrives. */
+  private proofreading = new Set<string>();
+  private proofread(record: Stored): void {
+    if (this.proofreading.has(record.id) || this.disposed) return;
+    this.proofreading.add(record.id);
+    void (async () => {
+      try {
+        for (;;) {
+          const batch = record.segments.filter(segment => segment.rewrite === "pending" && segment.status === "done").slice(0, REWRITE_BATCH);
+          if (!batch.length || this.disposed) return;
+          if (!this.settings.rewrite) { for (const segment of batch) segment.rewrite = null; await this.persist(record); this.emit(); continue; }
+          const first = batch[0].seq;
+          const context = record.segments.filter(segment => segment.status === "done" && segment.seq < first && segment.tag !== "chatter").slice(-3).map(({ id, text }) => ({ id, text }));
+          let fixed: Record<string, string> | null = null;
+          try { fixed = await rewriteSegments({ title: record.title, vocabulary: this.settings.vocabulary, language: this.settings.language, context, items: batch.map(({ id, text }) => ({ id, text })) }, this.deps.generate, this.settings.rewriteModel, this.deps.rewriteTimeoutMs ?? 20000); }
+          catch { this.deps.log("rewrite_failed", { success: false }); }
+          if (this.disposed) return;
+          for (const segment of batch) {
+            if (segment.rewrite !== "pending") continue;
+            const text = fixed?.[segment.id];
+            if (!fixed) segment.rewrite = "failed";
+            else if (text && text !== segment.text && acceptRewrite(segment.text, text)) { segment.raw = segment.text; segment.text = text; segment.rewrite = "done"; }
+            else segment.rewrite = "kept";
+          }
+          if (fixed) this.deps.log("rewrite_completed", { count: batch.length, success: true });
+          await this.persist(record); this.emit();
+        }
+      } finally { this.proofreading.delete(record.id); }
+    })();
+  }
+  /** Waits (bounded) for captions still being proofread, so the minutes are written from the corrected text. */
+  private async proofreadIdle(record: Stored, maxMs = 90000): Promise<void> {
+    for (const until = Date.now() + maxMs; Date.now() < until && record.segments.some(segment => segment.rewrite === "pending");) await new Promise(resolve => setTimeout(resolve, 300));
+  }
   private minutesRunning = new Set<string>();
   /** Writes the whole-meeting minutes in the background (a long meeting takes a minute or two); the page follows the state. */
   requestMinutes(id: string): Snapshot {
@@ -488,6 +527,7 @@ export class MeetingController {
     void this.persist(record).catch(() => undefined); this.emit();
     void (async () => {
       try {
+        if (record.segments.some(segment => segment.rewrite === "pending")) { await this.proofreadIdle(record); if (this.disposed) return; }
         const result = await generateMinutes(this.publicMeeting(record), this.deps.generate, this.settings.model, this.deps.organiseTimeoutMs ?? 60000);
         if (this.disposed) return;
         record.minutes = { markdown: result.markdown, at: Date.now(), through, model: result.model, state: "idle", error: null };

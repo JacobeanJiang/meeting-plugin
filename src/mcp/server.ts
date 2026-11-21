@@ -27,7 +27,7 @@ import type { Generate } from "../server/summary";
 import { wakePattern, type Assistant } from "../server/tasks";
 import { cliGenerate, cliSessions, pickRunner } from "./runner";
 
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 // stdout carries the protocol only; anything else a dependency prints goes to stderr.
 console.log = console.info = (...args: unknown[]) => console.error(...args);
 const env = process.env;
@@ -143,7 +143,7 @@ async function startPrimary(): Promise<Handlers> {
     data, temp, generate, emit: sync, log,
     sessions, assistant, quickTasks: !llmReady,
     // An agent CLI takes a while per answer and uses the person's own plan: organise less often and wait longer.
-    ...(organiser === "cli" ? { organiseEveryMs: 90000, organiseTimeoutMs: 150000 } : {}),
+    ...(organiser === "cli" ? { organiseEveryMs: 90000, organiseTimeoutMs: 150000, rewriteTimeoutMs: 150000 } : { rewriteTimeoutMs: 60000 }),
     recorderPath: here(windows ? "../native/meeting-recorder.exe" : "../native/meeting-recorder"),
     voxtypePath: here("../native/voxtype"),
     whisperPaths: ["../native/whisper-cli.exe", "../native/whisper-cli-compat.exe"].map(here),
@@ -161,6 +161,10 @@ async function startPrimary(): Promise<Handlers> {
     if (runner && existsSync(tasksMarker)) { next = { ...next, aiTasks: true }; await rm(tasksMarker, { force: true }); }
     if (!organiser && settings.autoSummary) { next = { ...next, autoSummary: false }; await writeFile(marker, ""); }
     if (organiser && existsSync(marker)) { next = { ...next, autoSummary: true }; await rm(marker, { force: true }); }
+    // Caption proofreading needs the same organiser; it is switched off without one and back on once there is one.
+    const rewriteMarker = path.join(home, ".rewrite-off");
+    if (!organiser && settings.rewrite) { next = { ...next, rewrite: false }; await writeFile(rewriteMarker, ""); }
+    if (organiser && existsSync(rewriteMarker)) { next = { ...next, rewrite: true }; await rm(rewriteMarker, { force: true }); }
     if (JSON.stringify(next) !== JSON.stringify(settings)) await meetings.configure(next);
   }
   // The page speaks of the configured assistant; without a task runner the "AI 执行" tab explains why it is off.
@@ -192,7 +196,7 @@ async function startPrimary(): Promise<Handlers> {
     const board = await boards.read(id);
     const snapshot = meetings.view(id); const meeting = snapshot.meeting!;
     const afterSeq = Number.isFinite(r.afterSeq) ? Number(r.afterSeq) : -1;
-    const transcript = meeting.segments.filter(segment => segment.seq > afterSeq && segment.status !== "empty").slice(0, 40).map(({ id, seq, startMs, endMs, status, text }) => ({ id, seq, startMs, endMs, status, text }));
+    const transcript = meeting.segments.filter(segment => segment.seq > afterSeq && segment.status !== "empty").slice(0, 40).map(({ id, seq, startMs, endMs, status, text, raw }) => ({ id, seq, startMs, endMs, status, text, ...(raw ? { recognised: raw } : {}) }));
     const revision = createHash("sha256").update(JSON.stringify({ board: board.revision, phase: meeting.phase, segments: meeting.segments, summaryThrough: meeting.summaryThrough, minutes: meeting.minutes?.at ?? null })).digest("hex");
     return { id, title: meeting.title, phase: meeting.phase, revision, plan: meeting.plan, summaries: meeting.summaries, items: meeting.items, links: meeting.links,
       board: { documents: board.documents.slice(offset, offset + limit), total: board.documents.length, nextOffset: offset + limit < board.documents.length ? offset + limit : null, selection: board.selection },

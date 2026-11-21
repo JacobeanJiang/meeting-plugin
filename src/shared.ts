@@ -6,14 +6,22 @@ export type Settings = {
   defaultForm: "auto" | "topics" | "mindmap" | "flow" | "matrix" | "status";
   /** Requests addressed to AI 助手 during a meeting are carried out in the background and shown on the meeting page. */
   aiTasks: boolean;
+  /** After recognition, an AI model proofreads each caption (misheard words, punctuation, fillers); the recognised text is kept. */
+  rewrite: boolean;
+  /** Model for proofreading; null uses the platform's default model. */
+  rewriteModel: string | null;
 };
-export const DEFAULT_SETTINGS: Settings = { binaryPath: "", model: null, autoSummary: true, chunkSecs: 15, asrModel: null, language: "zh", script: "simplified", vocabulary: "", vad: "standard", cleanup: true, defaultForm: "mindmap", aiTasks: true };
+export const DEFAULT_SETTINGS: Settings = { binaryPath: "", model: null, autoSummary: true, chunkSecs: 15, asrModel: null, language: "zh", script: "simplified", vocabulary: "", vad: "standard", cleanup: true, defaultForm: "mindmap", aiTasks: true, rewrite: true, rewriteModel: null };
 export type Segment = {
   id: string; seq: number; startMs: number; endMs: number;
   status: "pending" | "transcribing" | "done" | "empty" | "failed";
   text: string; error: string | null;
   /** Set by the organiser for small talk unrelated to the meeting; shown faded, never put on the board. */
   tag: "chatter" | null;
+  /** What speech recognition produced, when the caption text was proofread by the model; null otherwise (missing on older records). */
+  raw?: string | null;
+  /** Proofreading of this caption: waiting, done (text replaced), kept (the correction was rejected) or failed. */
+  rewrite?: "pending" | "done" | "kept" | "failed" | null;
 };
 export type Note = { kind: "point" | "decision" | "action" | "question"; topic: string; text: string; segmentIds: string[]; quote: string; owner: string | null; due: string | null };
 export const DEFAULT_TOPIC = "综合讨论";
