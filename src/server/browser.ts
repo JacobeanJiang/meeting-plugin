@@ -64,6 +64,13 @@ export class MeetingBrowser {
             catch (error) { response.writeHead(400); response.end(JSON.stringify({ error: error instanceof Error ? error.message : "纪要没有分享成功" })); }
             return;
           }
+          // A task a scenario proposed, carried out or left, in any meeting this page shows.
+          if (body.action === "taskDecide") {
+            const value = body as { taskId?: unknown; run?: unknown };
+            try { await this.controller.decideTask(meetingId, String(value.taskId ?? ""), value.run === true); response.end(JSON.stringify({ ok: true })); }
+            catch (error) { response.writeHead(400); response.end(JSON.stringify({ error: error instanceof Error ? error.message : "操作没有完成" })); }
+            return;
+          }
           if (this.controller.snapshot().meeting?.id !== meetingId) throw Error("此页面不是当前录音会议，请回到对应会话");
           if (body.action === "summarize") this.controller.summarizeNow();
           else if (body.action === "retry") await this.controller.retry();

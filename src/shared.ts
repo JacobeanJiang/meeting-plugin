@@ -10,8 +10,20 @@ export type Settings = {
   rewrite: boolean;
   /** Model for proofreading; null uses the platform's default model. */
   rewriteModel: string | null;
+  /** Situations the person describes in their own words; when the meeting gets there, the assistant does the work they set, without being named. */
+  scenarios: Scenario[];
 };
-export const DEFAULT_SETTINGS: Settings = { binaryPath: "", model: null, autoSummary: true, chunkSecs: 15, asrModel: null, language: "zh", script: "simplified", vocabulary: "", vad: "standard", cleanup: true, defaultForm: "mindmap", aiTasks: true, rewrite: true, rewriteModel: null };
+/** "when" the discussion matches, "action" what to do; confirm: wait for the person on the meeting page before carrying it out. */
+export type Scenario = { id: string; when: string; action: string; confirm: boolean; enabled: boolean };
+export const SCENARIO_LIMIT = 8;
+export const SCENARIO_TEXT_LIMIT = 200;
+/** Starting points offered when no scenario is set yet. */
+export const SCENARIO_EXAMPLES: { when: string; action: string }[] = [
+  { when: "会上提到线上问题、报错或 bug", action: "整理问题现象、影响范围和复现线索，写成一条可以直接提交的缺陷描述" },
+  { when: "有人问到具体数据，但会上没人能马上回答", action: "查询相关数据，给出结论和数据来源" },
+  { when: "会上定下了待办和负责人", action: "整理成待办清单：事项、负责人、截止时间" },
+];
+export const DEFAULT_SETTINGS: Settings = { binaryPath: "", model: null, autoSummary: true, chunkSecs: 15, asrModel: null, language: "zh", script: "simplified", vocabulary: "", vad: "standard", cleanup: true, defaultForm: "mindmap", aiTasks: true, rewrite: true, rewriteModel: null, scenarios: [] };
 export type Segment = {
   id: string; seq: number; startMs: number; endMs: number;
   status: "pending" | "transcribing" | "done" | "empty" | "failed";
@@ -86,7 +98,11 @@ export type Meeting = {
 };
 export type Minutes = { markdown: string | null; at: number | null; through: number; state: "idle" | "working" | "failed"; error: string | null; model: string | null };
 /** One request to AI 助手 heard in the meeting: queued, carried out in the background conversation, then its result or failure. */
-export type AiTask = { id: string; instruction: string; quote: string; refs: string[]; status: "queued" | "running" | "done" | "failed"; createdAt: number; startedAt: number | null; finishedAt: number | null; result: string | null; error: string | null; turnId: string | null };
+/**
+ * confirm: proposed by a scenario that waits for the person; skipped: the person declined it.
+ * scenario: the situation ("when") that raised it, as set at the time; absent for requests naming the assistant.
+ */
+export type AiTask = { id: string; instruction: string; quote: string; refs: string[]; status: "confirm" | "queued" | "running" | "done" | "failed" | "skipped"; createdAt: number; startedAt: number | null; finishedAt: number | null; result: string | null; error: string | null; turnId: string | null; scenario?: string | null };
 /** Recognition model preparation, done automatically after install: checking, downloading with progress, ready, or failed with a reason. */
 export type Setup = { status: "checking" | "downloading" | "ready" | "failed"; model: string; received: number; total: number; error: string | null };
 export type Snapshot = { settings: Settings; meeting: Meeting | null; levelDbfs: number | null; pending: number; history: { id: string; title: string; startedAt: number; phase: string; theme: string }[]; setup: Setup };

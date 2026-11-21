@@ -1,7 +1,7 @@
 {
   "name": "meeting-assistant-windows",
   "displayName": "Meeting Assistant (Windows)",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "description": "Record meetings from the microphone with local transcription, a live self-organising board, Q&A about what was said, work handed to the agent during the meeting, and structured minutes. (Windows)",
   "author": {
     "name": "JacobeanJiang",

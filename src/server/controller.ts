@@ -5,7 +5,7 @@ import { constants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { REWRITE_BATCH, acceptRewrite, rewriteSegments } from "./rewrite";
-import { asrChoicesFor, type AiTask, BOARD_FORMS, DEFAULT_SETTINGS, DEFAULT_TOPIC, FORM_LABEL, markdown, type BoardForm, type BoardSpace, type Settings, type Meeting, type Snapshot, type Environment, type Segment } from "../shared";
+import { asrChoicesFor, type AiTask, BOARD_FORMS, DEFAULT_SETTINGS, SCENARIO_LIMIT, SCENARIO_TEXT_LIMIT, type Scenario, DEFAULT_TOPIC, FORM_LABEL, markdown, type BoardForm, type BoardSpace, type Settings, type Meeting, type Snapshot, type Environment, type Segment } from "../shared";
 import { RETRY_PROMPT, VAD, asrConfig, asrPrompt, polishTranscript } from "./asr";
 import * as OpenCC from "opencc-js";
 import { ModelStore, WINDOWS_DEFAULTS, type SetupState } from "./models";
@@ -60,6 +60,24 @@ export type Deps = {
 /** Board stage narrower than this, on any screen that reported in the last minute, gets the compact board. */
 export const COMPACT_BELOW_PX = 960;
 const VIEWPORT_TTL_MS = 60000;
+/** Least time between two checks of the speech against the person's scenarios (a request naming the assistant is checked at once). */
+const SCENARIO_EVERY_MS = 30000;
+/** Scenarios from saved or submitted settings: both texts required and bounded, ids kept stable. */
+export function normalizeScenarios(value: unknown): Scenario[] {
+  if (!Array.isArray(value)) return [];
+  const out: Scenario[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object" || out.length >= SCENARIO_LIMIT) continue;
+    const r = raw as Record<string, unknown>;
+    const when = typeof r.when === "string" ? r.when.trim().slice(0, SCENARIO_TEXT_LIMIT) : "";
+    const action = typeof r.action === "string" ? r.action.trim().slice(0, SCENARIO_TEXT_LIMIT) : "";
+    if (!when || !action) continue;
+    let id = typeof r.id === "string" && /^[\w-]{1,24}$/.test(r.id) ? r.id : "";
+    if (!id || out.some(item => item.id === id)) id = "c" + randomUUID().slice(0, 8);
+    out.push({ id, when, action, confirm: r.confirm !== false, enabled: r.enabled !== false });
+  }
+  return out;
+}
 /**
  * Puts a file itself (as when copied in Finder or Explorer) on the clipboard so it can be pasted into a chat.
  * MEETING_SHARE_CLIPBOARD=off skips the real clipboard (tests).
@@ -233,7 +251,8 @@ export class MeetingController {
       language: pick(r.language, ["zh", "en", "ja", "ko", "auto"] as const, "zh"), script: pick(r.script, ["simplified", "traditional", "original"] as const, "simplified"),
       vocabulary: typeof r.vocabulary === "string" ? r.vocabulary.slice(0, 500) : "", vad: pick(r.vad, ["strict", "standard", "loose"] as const, "standard"), cleanup: r.cleanup !== false,
       defaultForm: (r.defaultForm === "auto" ? "mindmap" : pick(r.defaultForm, ["topics", "mindmap", "flow", "matrix", "status"] as const, "mindmap")), aiTasks: r.aiTasks !== false,
-      rewrite: r.rewrite !== false, rewriteModel: typeof r.rewriteModel === "string" && r.rewriteModel.trim() ? r.rewriteModel.trim().slice(0, 256) : null };
+      rewrite: r.rewrite !== false, rewriteModel: typeof r.rewriteModel === "string" && r.rewriteModel.trim() ? r.rewriteModel.trim().slice(0, 256) : null,
+      scenarios: normalizeScenarios(r.scenarios) };
   }
 
   private publicMeeting(record: Stored): Meeting { const { audioFiles: _files, sessionDir: _dir, asrModel: _model, ...value } = record; return value; }
@@ -484,8 +503,12 @@ export class MeetingController {
           // Organise at most every 40 s: a little more speech per round gives the model clearer topics (DingTalk refreshes its viewpoint tree about once a minute).
           if (text && this.settings.autoSummary && Date.now() - (record.summaryAt ?? 0) >= (this.deps.organiseEveryMs ?? 40000)) void this.doSummary(false).catch(() => undefined);
           // A request to AI 助手 may be split across two segments, so the previous one is checked together with this one.
+          // Without the name, the speech is checked against the person's scenarios at most every 30 s.
           const seq = segment.seq; const before = record.segments.filter(s => s.status === "done" && s.seq < seq).at(-1);
-          if (text && this.settings.aiTasks && mentionsAssistant((before?.text ?? "") + text, this.assistant)) void this.findTasks(record).catch(() => undefined);
+          const named = mentionsAssistant((before?.text ?? "") + text, this.assistant);
+          // Slower organisers (an agent CLI) are asked no more often than their organising rounds.
+          const scenarioDue = this.activeScenarios().length > 0 && Date.now() - (this.scenarioCheckedAt.get(record.id) ?? 0) >= Math.max(SCENARIO_EVERY_MS, this.deps.organiseEveryMs ?? 0);
+          if (text && this.settings.aiTasks && (named || scenarioDue)) void this.findTasks(record).catch(() => undefined);
         } catch { segment.status = "failed"; segment.error = "此段转写失败，音频已保留，可重试"; this.deps.log("segment_failed", { success: false }); }
         await this.persist(record); this.emit();
       }
@@ -595,22 +618,48 @@ export class MeetingController {
     return { path: file, name, copied };
   }
   private taskRunner: Promise<void> | null = null;
-  /** Looks at the newest speech for requests to AI 助手 and queues them; one detection at a time per meeting. */
+  /** Looks at the newest speech for requests to AI 助手 and the person's scenarios, and queues them; one detection at a time per meeting. */
   private detecting = new Set<string>();
+  /** A detection asked for while one was running runs again afterwards, so the latest speech is not left unchecked. */
+  private detectAgain = new Set<string>();
+  /** Per meeting: the last segment already checked, and when scenarios were last checked. */
+  private checkedThrough = new Map<string, number>();
+  private scenarioCheckedAt = new Map<string, number>();
+  private activeScenarios(): Scenario[] { return this.settings.scenarios.filter(scenario => scenario.enabled); }
   private async findTasks(record: Stored): Promise<void> {
-    if (this.detecting.has(record.id)) return;
+    if (this.detecting.has(record.id)) { this.detectAgain.add(record.id); return; }
     this.detecting.add(record.id);
     try {
-      const found = await detectTasks(this.publicMeeting(record), this.deps.generate, this.settings.model, this.assistant)
+      const scenarios = this.activeScenarios();
+      const through = record.segments.filter(segment => segment.status === "done" && segment.text).at(-1)?.seq ?? -1;
+      if (scenarios.length) this.scenarioCheckedAt.set(record.id, Date.now());
+      const found = await detectTasks(this.publicMeeting(record), this.deps.generate, this.settings.model, this.assistant, scenarios, this.checkedThrough.get(record.id) ?? -1)
         .catch(error => this.deps.quickTasks ? quickTasks(this.publicMeeting(record), this.assistant) : Promise.reject(error));
+      this.checkedThrough.set(record.id, Math.max(through, this.checkedThrough.get(record.id) ?? -1));
       if (!found.length || this.disposed) return;
       record.aiTasks ??= [];
-      for (const task of found) record.aiTasks.push({ id: "t" + (record.aiTasks.length + 1), ...task, status: "queued", createdAt: Date.now(), startedAt: null, finishedAt: null, result: null, error: null, turnId: null });
+      for (const { scenario: scenarioId, ...task } of found) {
+        const scenario = scenarios.find(item => item.id === scenarioId);
+        record.aiTasks.push({ id: "t" + (record.aiTasks.length + 1), ...task, scenario: scenario?.when ?? null, status: scenario?.confirm ? "confirm" : "queued", createdAt: Date.now(), startedAt: null, finishedAt: null, result: null, error: null, turnId: null });
+      }
       await this.persist(record); this.emit();
       this.deps.log("task_detected", { count: found.length, success: true });
       this.runTasks();
     } catch { this.deps.log("task_detect_failed", { success: false }); }
-    finally { this.detecting.delete(record.id); }
+    finally {
+      this.detecting.delete(record.id);
+      if (this.detectAgain.delete(record.id) && !this.disposed) void this.findTasks(record).catch(() => undefined);
+    }
+  }
+  /** The person's answer to a task a scenario proposed: carry it out, or leave it. */
+  async decideTask(meetingId: string, taskId: string, run: boolean): Promise<Snapshot> {
+    const record = this.records.get(meetingId); const task = record?.aiTasks?.find(entry => entry.id === taskId);
+    if (!record || !task) throw Error("未找到这个会中任务");
+    if (task.status !== "confirm") throw Error("这个任务已经处理过了");
+    Object.assign(task, run ? { status: "queued" } : { status: "skipped", finishedAt: Date.now() });
+    await this.persist(record); this.emit();
+    if (run) this.runTasks();
+    return this.snapshot();
   }
   /** Carries out queued tasks one after another in each meeting's background conversation, across meetings. */
   private runTasks(): void {

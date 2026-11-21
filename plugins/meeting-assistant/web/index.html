@@ -88,7 +88,9 @@ body.tab-minutes .minutes{display:block}
 .task.fresh{box-shadow:0 0 0 2px var(--ink)}
 .task header{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:11.5px;color:var(--muted)}
 .task .st{padding:2px 7px;border-radius:999px;background:var(--paper);color:var(--ink-2);font-weight:600}
-.task .st.running{background:#eef2ff;color:#3b4bbf}.task .st.done{background:#e7f6ec;color:#1f7a45}.task .st.failed{background:#fdecea;color:#b3261e}
+.task .st.running{background:#eef2ff;color:#3b4bbf}.task .st.confirm{background:#fff4e5;color:#a05a00}.task .st.skipped{color:var(--muted)}
+.task .scene{margin:-2px 0 4px;font-size:11.5px;color:var(--muted)}
+.task .decide{display:flex;gap:6px;margin-top:10px}.task .decide button{height:28px;padding:0 12px;border-radius:8px;font-size:12.5px;box-shadow:inset 0 0 0 1px var(--line-2)}.task .decide .primary{background:var(--ink);color:#fff;box-shadow:none}.task .st.done{background:#e7f6ec;color:#1f7a45}.task .st.failed{background:#fdecea;color:#b3261e}
 .task h4{margin:0 0 4px;font-size:13.5px;line-height:1.5}
 .task .quote{font-size:12px;color:var(--muted);line-height:1.6;cursor:pointer}.task .quote:hover{color:var(--ink)}
 .task .err{margin-top:8px;font-size:12px;color:#b3261e;line-height:1.6}
@@ -205,6 +207,14 @@ body:not(.panel-open) .panel{display:none}
 .drawer [hidden]{display:none!important}
 .drawer small{display:block;margin-top:4px;font-size:11.5px;color:var(--muted)}
 .drawer .check{display:flex;gap:8px;align-items:flex-start}.drawer .check input{margin-top:3px;accent-color:var(--ink)}
+.scenes{margin:10px 0;padding:12px;border-radius:12px;background:var(--paper)}.scenes>b{display:block;font-size:13px}
+.scene-card{margin:10px 0;padding:10px 12px 8px;border-radius:10px;background:var(--surface);box-shadow:0 0 0 1px var(--line)}
+.drawer .scene-card label{margin:2px 0 8px;font-size:12px}.drawer .scene-card textarea{resize:vertical}
+.scene-row{display:flex;align-items:center;gap:14px;font-size:12px}.drawer .scene-row label{display:flex;align-items:center;gap:5px;margin:0}.scene-row input{accent-color:var(--ink)}
+.scene-row .del{margin-left:auto;color:#b3261e;font-size:12px}
+.scenes .add{height:30px;padding:0 12px;border-radius:8px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line-2);font-size:12.5px}.scenes .add[hidden]{display:none}
+.scenes .examples{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.scenes .examples button{padding:4px 10px;border-radius:999px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line-2);font-size:11.5px;color:var(--ink-2)}
+.drawer .scenes .warn{color:#a05a00}
 .drawer footer{display:flex;align-items:center;gap:10px;padding:12px 20px 16px;border-top:1px solid var(--line)}
 .drawer footer span{flex:1;font-size:11.5px;color:var(--muted)}
 .drawer .save{height:34px;padding:0 16px;border-radius:10px;background:var(--ink);color:#fff;font-weight:600}
@@ -290,6 +300,7 @@ body:not(.panel-open) .panel{display:none}
 <h4>AI 整理</h4>
 <label class="check"><input type="checkbox" id="sAuto"><span>会议中自动整理<small>转写文字会发送给所配置的整理模型</small></span></label>
 <label class="check ai-setting"><input type="checkbox" id="sAiTasks"><span>会中 AI 执行<small>会上说“AI 助手，帮我……”时，AI 助手 在后台直接执行，结果显示在“AI 执行”里</small></span></label>
+<div class="scenes ai-setting" id="scenes"><b>自定义场景</b><small>不用点名，会上讨论到这些情况时 AI 也会接手。新场景默认先在“AI 执行”里等你确认再执行。</small><div id="sceneList"></div><button type="button" class="add" id="sceneAdd">＋ 添加场景</button><div class="examples" id="sceneExamples"></div><small class="warn" id="sceneWarn" hidden>两项都填写的场景才会保存。</small></div>
 <h4>白板</h4>
 <label>新会议默认形式<select id="sForm"><option value="mindmap">思维导图：主题 → 议题 → 观点（推荐）</option><option value="topics">议题分区</option><option value="flow">流程线</option><option value="matrix">方案对比</option><option value="status">进度看板</option></select></label>
 </div>
@@ -423,7 +434,7 @@ function markdown(src){const lines=String(src||'').replace(/\r/g,'').split('\n')
     if((m=line.match(/^\s*\d+[.)、]\s*(.*)$/))){if(list!=='ol'){close();out.push('<ol>');list='ol'}out.push('<li>'+inline(m[1])+'</li>');continue}
     close();out.push('<p>'+inline(line)+'</p>')}
   if(code!==null)out.push('<pre><code>'+code.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</code></pre>');close();return out.join('')}
-const TASK_ST={queued:'排队中',running:'执行中',done:'已完成',failed:'没完成'};
+const TASK_ST={confirm:'等你确认',queued:'排队中',running:'执行中',done:'已完成',failed:'没完成',skipped:'已忽略'};
 let tab='feed',seenTasks=null,unread=new Set(),popTask='',popTimer=0;
 function setTab(name){tab=name;document.body.classList.toggle('tab-ai',name==='ai');document.body.classList.toggle('tab-minutes',name==='minutes');for(const b of document.querySelectorAll('.tab')){const on=b.dataset.tab===name;b.classList.toggle('on',on);b.setAttribute('aria-selected',String(on))}
   if(name==='ai'){unread.clear();paintCount()}if(!document.body.classList.contains('panel-open')){document.body.classList.add('panel-open');$('toggle').setAttribute('aria-pressed','true')}}
@@ -433,28 +444,30 @@ function elapsed(t){const from=t.startedAt||t.createdAt;return time((t.finishedA
 // Cards are rebuilt only when a task changes; the running time ticks in place, and only cards that are new play the entrance.
 let shownTasks=new Set();
 function taskTime(t){return new Date(t.createdAt).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})+(t.status==='running'||t.status==='done'||t.status==='failed'?' · 用时 '+elapsed(t):'')}
-function showPop(t){popTask=t.id;$('popState').textContent=t.status==='done'?'已完成':t.status==='failed'?'没完成':'收到任务';$('popTitle').textContent=t.instruction;
+function showPop(t){popTask=t.id;$('popState').textContent=t.status==='done'?'已完成':t.status==='failed'?'没完成':t.status==='confirm'?'符合场景，等你确认':'收到任务';$('popTitle').textContent=t.instruction;
   const body=$('popBody');if(t.status==='done'&&t.result){body.innerHTML=markdown(t.result);body.hidden=false}else if(t.status==='failed'||(t.status==='done'&&t.error)){body.textContent=t.error||'';body.hidden=!t.error}else body.hidden=true;
   $('pop').hidden=false;clearTimeout(popTimer);popTimer=setTimeout(()=>{$('pop').hidden=true},t.status==='queued'||t.status==='running'?8000:30000)}
+async function decideTask(t,run){busy=true;try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'taskDecide',taskId:t.id,run})});if(!r.ok){const j=await r.json().catch(()=>({}));throw Error(j.error||'操作没有完成')}}catch(e){notice(e.message,5000)}finally{busy=false;await refresh()}}
 $('popClose').onclick=()=>{$('pop').hidden=true};
 $('popView').onclick=()=>{$('pop').hidden=true;setTab('ai');const card=document.querySelector('[data-task="'+popTask+'"]');if(card)card.scrollIntoView({block:'nearest',behavior:'smooth'})};
 function renderTasks(m){const tasks=m.aiTasks||[];const box=$('ailist');
   if(seenTasks===null){seenTasks=new Map(tasks.map(t=>[t.id,t.status]))}
-  else for(const t of tasks){const before=seenTasks.get(t.id);if(before!==t.status){if(!before||t.status==='done'||t.status==='failed'){showPop(t);if(tab!=='ai')unread.add(t.id)}seenTasks.set(t.id,t.status)}}
+  else for(const t of tasks){const before=seenTasks.get(t.id);if(before!==t.status){if(!before||t.status==='done'||t.status==='failed'){if(t.status!=='skipped')showPop(t);if(tab!=='ai')unread.add(t.id)}seenTasks.set(t.id,t.status)}}
   paintCount();
   for(const el of box.querySelectorAll('[data-task-time]')){const t=tasks.find(x=>x.id===el.dataset.taskTime);if(t&&el.textContent!==taskTime(t))el.textContent=taskTime(t)}
-  const key=JSON.stringify([latest&&latest.settings&&latest.settings.aiTasks,tasks.map(t=>[t.id,t.status,t.result,t.error,t.instruction,t.quote,unread.has(t.id)])]);if(box.dataset.key===key)return;box.dataset.key=key;const before=shownTasks;shownTasks=new Set(tasks.map(t=>t.id));
+  const key=JSON.stringify([latest&&latest.settings&&latest.settings.aiTasks,tasks.map(t=>[t.id,t.status,t.result,t.error,t.instruction,t.quote,t.scenario,unread.has(t.id)])]);if(box.dataset.key===key)return;box.dataset.key=key;const before=shownTasks;shownTasks=new Set(tasks.map(t=>t.id));
   box.replaceChildren();
   if(!tasks.length){const e=document.createElement('div');e.className='ai-empty';
     if(document.body.classList.contains('no-ai'))e.innerHTML='<b>会中 AI 执行暂不可用</b>没有在这台电脑上找到 Codex、Claude Code 或 Cursor 的命令行，所以会上点名AI 助手的请求不会被执行。安装其中任意一个后，重新打开会议页即可使用。';
     else if(latest&&latest.settings&&latest.settings.aiTasks===false){e.innerHTML='<b>会中 AI 执行已关闭</b>打开后，会上说“AI 助手，帮我……”，AI 助手会在后台执行，结果显示在这里。';const b=document.createElement('button');b.textContent='打开设置';b.onclick=openSettings;e.append(b)}
-    else e.innerHTML='<b>会上可以直接请AI 助手做事</b>说“AI 助手，帮我查一下……”“AI 助手，把刚才的结论整理成待办”，AI 助手会在后台执行，结果显示在这里。';
+    else{e.innerHTML='<b>会上可以直接请AI 助手做事</b>说“AI 助手，帮我查一下……”“AI 助手，把刚才的结论整理成待办”，AI 助手会在后台执行，结果显示在这里。也可以添加自定义场景，会上讨论到时 AI 会主动接手。';const b=document.createElement('button');b.textContent='设置自定义场景';b.onclick=openSettings;e.append(b)}
     box.append(e);return}
   for(const t of [...tasks].sort((a,b)=>b.createdAt-a.createdAt)){const card=document.createElement('article');card.className='task';card.dataset.task=t.id;if(unread.has(t.id))card.classList.add('fresh');if(before.has(t.id))card.classList.add('still');
     const h=document.createElement('header');const st=document.createElement('span');st.className='st '+t.status;st.textContent=TASK_ST[t.status]||t.status;const tm=document.createElement('span');tm.dataset.taskTime=t.id;tm.textContent=taskTime(t);h.append(st,tm);
-    const h4=document.createElement('h4');h4.textContent=t.instruction;
+    const h4=document.createElement('h4');h4.textContent=t.instruction;if(t.scenario){const sc=document.createElement('div');sc.className='scene';sc.textContent='场景：'+t.scenario;card.append(sc)}
     const q=document.createElement('div');q.className='quote';q.textContent='「'+t.quote+'」 '+t.refs.map(id=>'#'+(Number(id.slice(1))+1)).join(' ');q.title='在实时字幕中定位原话';q.onclick=()=>{setTab('feed');const row=rendered.get(t.refs[0]);if(row){stick=false;row.scrollIntoView({block:'center',behavior:'smooth'})}};
-    card.append(h,h4,q);
+    card.prepend(h);card.append(h4,q);
+    if(t.status==='confirm'){const acts=document.createElement('div');acts.className='decide';const run=document.createElement('button');run.className='primary';run.textContent='执行';run.onclick=()=>decideTask(t,true);const skip=document.createElement('button');skip.textContent='忽略';skip.onclick=()=>decideTask(t,false);acts.append(run,skip);card.append(acts)}
     if(t.result){const md=document.createElement('div');md.className='md';md.innerHTML=markdown(t.result);card.append(md)}
     if(t.error){const e=document.createElement('div');e.className='err';e.textContent=t.error;card.append(e)}
     box.append(card)}}
@@ -503,7 +516,7 @@ let ASR_HINT={'large-v3-turbo-q5_0':'推荐 · 574MB','large-v3-turbo':'更准 �
 async function openSettings(){try{const r=await fetch(new URL('api/settings',location.href),{cache:'no-store'});if(!r.ok)throw Error();const data=await r.json();current=data.settings;const env=data.environment||{};if(env.asrChoices)ASR_HINT=Object.fromEntries(env.asrChoices.map(c=>[c.name,c.label]));
   const sel=$('sAsr');sel.replaceChildren();const add=(v,t)=>{const o=document.createElement('option');o.value=v;o.textContent=t;sel.append(o)};add('','自动'+(env.defaultAsrModel?'（'+env.defaultAsrModel+'）':''));const have=env.asrModels||[];
   for(const name of new Set([...Object.keys(ASR_HINT),...have,...(current.asrModel?[current.asrModel]:[])]))add(name,name+(ASR_HINT[name]?' · '+ASR_HINT[name]:'')+(have.includes(name)?'（已安装）':'（选择后自动下载）'));
-  sel.value=current.asrModel||'';$('sLang').value=current.language;$('sScript').value=current.script;$('sVocab').value=current.vocabulary;$('sVad').value=current.vad;$('sChunk').value=String(current.chunkSecs);$('sClean').checked=current.cleanup;$('sAuto').checked=current.autoSummary;$('sAiTasks').checked=current.aiTasks!==false;$('sRewrite').checked=current.rewrite!==false;$('sRewriteModel').value=current.rewriteModel||'';fillModels(data.models||[],current.rewriteModel);syncRewrite();$('sForm').value=current.defaultForm;syncScript();
+  sel.value=current.asrModel||'';$('sLang').value=current.language;$('sScript').value=current.script;$('sVocab').value=current.vocabulary;$('sVad').value=current.vad;$('sChunk').value=String(current.chunkSecs);$('sClean').checked=current.cleanup;$('sAuto').checked=current.autoSummary;$('sAiTasks').checked=current.aiTasks!==false;scenes=(current.scenarios||[]).map(x=>({...x}));paintScenes();$('sRewrite').checked=current.rewrite!==false;$('sRewriteModel').value=current.rewriteModel||'';fillModels(data.models||[],current.rewriteModel);syncRewrite();$('sForm').value=current.defaultForm;syncScript();
   const live=latest&&latest.meeting&&['starting','recording','paused','stopping'].includes(latest.meeting.phase);$('sNote').textContent=live?'识别模型、语言、名词、静音和分段从下一场会议生效；其余立即生效':'保存后用于新会议';
   $('drawer').hidden=false;$('scrim').hidden=false}catch{dismissed='';toast('暂时读取不到设置，请稍后重试')}}
 function closeSettings(){$('drawer').hidden=true;$('scrim').hidden=true}
@@ -517,7 +530,22 @@ function fillModels(list,chosen){const pick=$('sRewritePick');pick.replaceChildr
 function syncRewrite(){const on=$('sRewrite').checked,pick=$('sRewritePick'),custom=pick.hidden||pick.value==='__custom';pick.disabled=!on;$('sRewriteModel').hidden=!custom;$('sRewriteModel').disabled=!on}
 function chosenModel(){const pick=$('sRewritePick');return !pick.hidden&&pick.value!=='__custom'?(pick.value||null):($('sRewriteModel').value.trim()||null)}$('gear').onclick=openSettings;$('drawerClose').onclick=closeSettings;$('scrim').onclick=closeSettings;
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('drawer').hidden)closeSettings()});
-$('sSave').onclick=async()=>{if(!current)return;const next={...current,asrModel:$('sAsr').value||null,language:$('sLang').value,script:$('sScript').value,vocabulary:$('sVocab').value.trim(),vad:$('sVad').value,chunkSecs:Number($('sChunk').value),cleanup:$('sClean').checked,autoSummary:$('sAuto').checked,aiTasks:$('sAiTasks').checked,rewrite:$('sRewrite').checked,rewriteModel:chosenModel(),defaultForm:$('sForm').value};
+const SCENE_EXAMPLES=[['会上提到线上问题、报错或 bug','整理问题现象、影响范围和复现线索，写成一条可以直接提交的缺陷描述'],['有人问到具体数据，但会上没人能马上回答','查询相关数据，给出结论和数据来源'],['会上定下了待办和负责人','整理成待办清单：事项、负责人、截止时间']];
+let scenes=[];
+function paintScenes(){const list=$('sceneList');list.replaceChildren();
+  scenes.forEach((sc,i)=>{const card=document.createElement('div');card.className='scene-card';card.setAttribute('role','group');card.setAttribute('aria-label','场景 '+(i+1));
+    const field=(label,key,tag,ph)=>{const l=document.createElement('label');l.textContent=label;const input=document.createElement(tag);if(tag==='textarea')input.rows=2;else input.type='text';input.maxLength=200;input.placeholder=ph;input.value=sc[key];input.oninput=()=>{sc[key]=input.value;$('sceneWarn').hidden=!scenes.some(x=>!x.when.trim()||!x.action.trim())};l.append(input);return l};
+    const row=document.createElement('div');row.className='scene-row';
+    const box=(label,key)=>{const l=document.createElement('label');const c=document.createElement('input');c.type='checkbox';c.checked=sc[key];c.onchange=()=>{sc[key]=c.checked};l.append(c,label);return l};
+    const del=document.createElement('button');del.type='button';del.className='del';del.textContent='删除';del.onclick=()=>{scenes.splice(i,1);paintScenes()};
+    row.append(box('先问我再执行','confirm'),box('启用','enabled'),del);
+    card.append(field('什么时候','when','input','例如：会上提到线上问题、报错或 bug'),field('让 AI 做什么','action','textarea','例如：整理问题现象和影响范围，写成一条缺陷描述'),row);list.append(card)});
+  $('sceneAdd').hidden=scenes.length>=8;
+  const ex=$('sceneExamples');ex.replaceChildren();if(!scenes.length){const t=document.createElement('small');t.textContent='从示例添加：';ex.append(t);for(const [when,action] of SCENE_EXAMPLES){const b=document.createElement('button');b.type='button';b.textContent=when;b.title=action;b.onclick=()=>addScene(when,action);ex.append(b)}}
+  $('sceneWarn').hidden=!scenes.some(x=>!x.when.trim()||!x.action.trim())}
+function addScene(when,action){scenes.push({id:'c'+Date.now().toString(36),when:when||'',action:action||'',confirm:true,enabled:true});paintScenes()}
+$('sceneAdd').onclick=()=>addScene();
+$('sSave').onclick=async()=>{if(!current)return;const next={...current,scenarios:scenes.map(x=>({...x,when:x.when.trim(),action:x.action.trim()})).filter(x=>x.when&&x.action),asrModel:$('sAsr').value||null,language:$('sLang').value,script:$('sScript').value,vocabulary:$('sVocab').value.trim(),vad:$('sVad').value,chunkSecs:Number($('sChunk').value),cleanup:$('sClean').checked,autoSummary:$('sAuto').checked,aiTasks:$('sAiTasks').checked,rewrite:$('sRewrite').checked,rewriteModel:chosenModel(),defaultForm:$('sForm').value};
   $('sSave').disabled=true;try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'settings',settings:next})});if(!r.ok)throw Error();closeSettings()}catch{dismissed='';toast('设置没有保存成功，请重试')}finally{$('sSave').disabled=false}};
 let polling=false;setInterval(async()=>{if(!polling){polling=true;await refresh();polling=false}},1000);refresh();
 // ---- board size ----

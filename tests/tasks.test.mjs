@@ -4,7 +4,7 @@ import { build } from 'esbuild';
 import { mkdtemp, writeFile, chmod, rm, readFile } from 'node:fs/promises';
 import path from 'node:path';
 const load = async entry => { const b = await build({ entryPoints: [entry], bundle: true, write: false, platform: 'node', format: 'esm' }); return import('data:text/javascript;base64,' + Buffer.from(b.outputFiles[0].text).toString('base64')); };
-const { wakePattern, quickTasks, taskMessage, mentionsAssistant } = await load('src/server/tasks.ts');
+const { wakePattern, quickTasks, taskMessage, mentionsAssistant, detectTasks } = await load('src/server/tasks.ts');
 const { pickRunner, cliSessions, cliGenerate } = await load('src/mcp/runner.ts');
 const seg = (seq, text) => ({ id: 's' + seq, seq, startMs: seq * 15000, endMs: (seq + 1) * 15000, status: 'done', text, error: null, tag: null });
 
@@ -110,3 +110,25 @@ test('the models the agent CLI offers are read from it: Codex over app-server (p
     assert.deepEqual(await listModels({ name: 'codex', path: broken }, 300), [], 'no answer in time: empty');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('scenario detection reads only new speech, keeps tasks for known scenarios or named requests, and says which scenario raised a task', async () => {
+  const calls = [];
+  const generate = async input => { calls.push(input); return { text: JSON.stringify({ tasks: [
+    { instruction: '写缺陷描述', quote: '支付报错', refs: ['s1'], scenario: 'c1' },
+    { instruction: '未知场景', quote: '排期', refs: ['s1'], scenario: 'nope' },
+    { instruction: '查排期', quote: 'AI 助手 查一下排期', refs: ['s2'], scenario: null }] }), model: 'm' }; };
+  const meeting = { title: '复盘', segments: [seg(0, '开始吧'), seg(1, '支付报错了，排期也要看'), seg(2, 'AI 助手 查一下排期')], aiTasks: [] };
+  const scenarios = [{ id: 'c1', when: '提到线上问题', action: '写缺陷描述', confirm: true, enabled: true }];
+  const found = await detectTasks(meeting, generate, null, undefined, scenarios, 0);
+  assert.deepEqual(found.map(task => [task.instruction, task.scenario]), [['写缺陷描述', 'c1'], ['查排期', undefined]]);
+  const prompt = JSON.parse(calls[0].prompt);
+  assert.deepEqual(prompt.latest.map(item => item.id), ['s1', 's2']); assert.deepEqual(prompt.context.map(item => item.id), ['s0']);
+  assert.match(calls[0].instructions, /预先设定了一些场景/);
+  assert.deepEqual(await detectTasks(meeting, generate, null, undefined, scenarios, 2), [], 'nothing new to read');
+  assert.equal(calls.length, 1, 'and no model call for it');
+  await detectTasks(meeting, generate, null, undefined, [], -1);
+  assert.doesNotMatch(calls[1].instructions, /预先设定/, 'without scenarios only named requests are looked for');
+  const message = taskMessage({ id: 'm', title: '复盘', segments: meeting.segments, summaries: [] }, { id: 't1', instruction: '写缺陷描述', quote: '支付报错', scenario: '提到线上问题' });
+  assert.match(message, /符合预先设定的场景「提到线上问题」/); assert.match(message, /触发场景的原话：「支付报错」/);
+});
+
