@@ -60,6 +60,26 @@ export type Deps = {
 /** Board stage narrower than this, on any screen that reported in the last minute, gets the compact board. */
 export const COMPACT_BELOW_PX = 960;
 const VIEWPORT_TTL_MS = 60000;
+/**
+ * Puts a file itself (as when copied in Finder or Explorer) on the clipboard so it can be pasted into a chat.
+ * MEETING_SHARE_CLIPBOARD=off skips the real clipboard (tests).
+ */
+function copyFileToClipboard(file: string): Promise<boolean> {
+  if (process.env.MEETING_SHARE_CLIPBOARD === "off") return Promise.resolve(false);
+  // The path is passed as an argument or environment value, never inside the script text.
+  const command: [string, string[], NodeJS.ProcessEnv] | null =
+    process.platform === "darwin" ? ["osascript", ["-l", "JavaScript", "-e", "function run(argv){ObjC.import('AppKit');const board=$.NSPasteboard.generalPasteboard;board.clearContents;return board.writeObjects($([$.NSURL.fileURLWithPath(argv[0])]))}", file], process.env]
+    : process.platform === "win32" ? ["powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Set-Clipboard -LiteralPath $env:MEETING_SHARE_FILE"], { ...process.env, MEETING_SHARE_FILE: file }]
+    : null;
+  if (!command) return Promise.resolve(false);
+  const [binary, args, env] = command;
+  return new Promise(resolve => execFile(binary, args, { timeout: 10000, env, windowsHide: true }, (error, stdout) => resolve(!error && !/^false/.test(String(stdout).trim()))));
+}
+/** Readable file name from the meeting title, safe on macOS and Windows. */
+export function shareName(title: string): string {
+  const safe = title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().replace(/^\.+/, "").slice(0, 60).trim();
+  return (safe || "会议") + "-会议纪要.html";
+}
 export function parseTranscript(output: string): string {
   if (/No speech detected, skipping transcription\./.test(output)) return "";
   // v1.2.2's CLI prints diagnostics followed by a blank line and then the transcript.
@@ -561,6 +581,18 @@ export class MeetingController {
     const directory = path.join(this.deps.data, "exports"); await mkdir(directory, { recursive: true, mode: 0o700 });
     const file = path.join(directory, record.id + "-纪要.html"); await writeFile(file, minutesDocument(record.minutes.markdown, record.title, minutesMeta(record.startedAt, record.endedAt)), { mode: 0o600 });
     return { path: file };
+  }
+  /** Minutes as an HTML file named after the meeting, put on the clipboard as a file to paste into a chat. */
+  async share(id: string): Promise<{ path: string; name: string; copied: boolean }> {
+    const record = this.records.get(id);
+    if (!record?.minutes?.markdown) throw Error("这场会议还没有会议纪要，请先生成");
+    // One folder per meeting keeps meetings with the same title apart while the file keeps the readable name.
+    const directory = path.join(this.deps.data, "exports", "share", record.id); await mkdir(directory, { recursive: true, mode: 0o700 });
+    const name = shareName(record.title);
+    const file = path.join(directory, name); await writeFile(file, minutesDocument(record.minutes.markdown, record.title, minutesMeta(record.startedAt, record.endedAt)), { mode: 0o600 });
+    const copied = await copyFileToClipboard(file);
+    this.deps.log("minutes_shared", { success: copied });
+    return { path: file, name, copied };
   }
   private taskRunner: Promise<void> | null = null;
   /** Looks at the newest speech for requests to AI 助手 and queues them; one detection at a time per meeting. */

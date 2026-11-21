@@ -23,57 +23,52 @@ svg{display:block}
 .num{font-family:"SF Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:.02em}
 
 /* ---------- top bar ---------- */
-.bar{position:relative;z-index:10;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:16px;padding:14px 18px 10px;animation:rise .5s var(--ease) both}
-.ident{display:flex;align-items:center;gap:12px;min-width:0}
-.mark{flex:none;width:34px;height:34px;border-radius:11px;background:var(--ink);display:flex;align-items:center;justify-content:center;gap:3px;box-shadow:0 6px 16px -8px rgba(23,22,26,.6)}
-.mark i{display:block;width:3px;border-radius:2px;background:#fff;animation:mark 1.6s ease-in-out infinite}
-.mark i:nth-child(1){height:8px}.mark i:nth-child(2){height:16px;animation-delay:.2s}.mark i:nth-child(3){height:11px;animation-delay:.4s}
-body:not(.live) .mark i{animation:none}
-.names{min-width:0}
-h1{margin:0;font-size:16px;font-weight:650;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.theme{margin:1px 0 0;font-size:12.5px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.theme.wait{color:var(--muted)}
+.bar{position:relative;z-index:10;display:flex;align-items:center;gap:12px;padding:12px 16px 10px;animation:rise .5s var(--ease) both}
+.ident{flex:1 1 auto;display:flex;align-items:center;gap:6px 12px;min-width:0}
+h1{margin:0;flex:0 1 auto;min-width:0;font-size:16px;font-weight:650;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.when{flex:none;font-size:12.5px;color:var(--muted);white-space:nowrap}
 
-/* recording capsule */
-.capsule{display:flex;align-items:center;gap:10px;height:44px;padding:0 6px 0 16px;border-radius:999px;background:var(--ink);color:#fff;
-  box-shadow:0 14px 30px -14px rgba(23,22,26,.55),inset 0 0 0 1px rgba(255,255,255,.06);transition:background .3s,color .3s}
-.dot{width:9px;height:9px;border-radius:50%;background:#8b8781;flex:none;position:relative}
-.capsule[data-phase=recording] .dot{background:var(--rec)}
-.capsule[data-phase=recording] .dot::after{content:"";position:absolute;inset:-5px;border-radius:50%;border:2px solid var(--rec-glow);animation:ping 1.6s var(--ease) infinite}
+/* status chip with the recording controls, as on the plugin page */
+.capsule{flex:none;display:flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:999px;background:var(--surface);color:var(--ink-2);box-shadow:inset 0 0 0 1px var(--line-2);font-size:12px;white-space:nowrap;transition:background .3s,color .3s}
+.dot{width:7px;height:7px;border-radius:50%;background:#aaa59c;flex:none}
+.capsule[data-phase=recording],.capsule[data-phase=paused],.capsule[data-phase=starting]{padding-right:3px}
+.capsule[data-phase=recording]{background:#fff6f3;color:var(--rec);box-shadow:inset 0 0 0 1px rgba(255,77,46,.28)}
+.capsule[data-phase=recording] .dot{background:var(--rec);box-shadow:0 0 0 3px rgba(255,77,46,.18)}
 .capsule[data-phase=starting] .dot{animation:blink 1s ease-in-out infinite}
 .capsule[data-phase=paused] .dot{background:var(--amber)}
-#phase{font-size:12.5px;color:rgba(255,255,255,.72);white-space:nowrap}
-#clock{font-size:15px;font-weight:600;min-width:52px}
-.wave{display:flex;align-items:center;gap:2.5px;height:22px;width:74px}
-.wave i{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.85);transition:height .12s linear}
-.capsule .ctl{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.12);transition:background .2s}
-.capsule .ctl:hover:not(:disabled){background:rgba(255,255,255,.22)}
-.capsule .end{height:32px;padding:0 14px;border-radius:999px;background:var(--rec);color:#fff;font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;transition:filter .2s}
+#clock{font-size:12.5px;font-weight:600;color:var(--ink)}
+.wave{display:flex;align-items:center;gap:2px;height:14px;width:30px}
+.wave i{flex:1;height:3px;border-radius:2px;background:var(--rec);transition:height .12s linear}
+.capsule:not([data-phase=recording]) .wave{display:none}
+.capsule .ctl{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;color:inherit}
+.capsule .ctl:hover:not(:disabled){background:rgba(23,22,26,.06)}
+.capsule .end{height:24px;padding:0 10px;border-radius:999px;background:var(--rec);color:#fff;font-weight:600;font-size:11.5px;transition:filter .2s}
 .capsule .end:hover:not(:disabled){filter:brightness(1.08)}
-.capsule[data-phase=complete],.capsule[data-phase=interrupted]{background:var(--surface);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line-2)}
-.capsule[data-phase=complete] #phase,.capsule[data-phase=interrupted] #phase{color:var(--muted)}
-.capsule[data-phase=complete] .rec-only,.capsule[data-phase=interrupted] .rec-only{display:none}
-.capsule[data-phase=complete]{padding-right:16px}
+.capsule[data-phase=complete] .rec-only,.capsule[data-phase=interrupted] .rec-only,.capsule[data-phase=stopping] .rec-only{display:none}
 
 /* right tools */
-.tools{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0}
+.tools{flex:none;display:flex;align-items:center;justify-content:flex-end;gap:4px;min-width:0}
+.tools .ai{margin-right:6px}
 .ai{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-2);white-space:nowrap;min-width:0}
 .ai span{overflow:hidden;text-overflow:ellipsis}
 .ai.busy span{background:linear-gradient(90deg,var(--ink-2) 0%,var(--ink-2) 35%,#c9c3b8 50%,var(--ink-2) 65%,var(--ink-2) 100%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shimmer 2.2s linear infinite}
 .ai svg{flex:none;color:var(--rec)}
 .ai.busy svg{animation:spin 3s linear infinite}
-.chip{height:34px;padding:0 12px;border-radius:10px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line-2);display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap;transition:box-shadow .2s,background .2s}
+.chip{height:32px;padding:0 11px;margin-right:4px;border-radius:9px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line-2);display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap;transition:box-shadow .2s,background .2s}
 .chip:hover:not(:disabled){box-shadow:inset 0 0 0 1px var(--ink)}
 .chip small{color:var(--muted);font-size:11.5px}
-.icon{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line-2)}
-body.panel-open #toggle{background:var(--ink);color:#fff;box-shadow:none}
+.icon{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;color:var(--ink-2)}
+.icon:hover:not(:disabled){background:#eeece7;color:var(--ink)}
+body.panel-open #toggle{background:#e6e3dc;color:var(--ink)}
 .picker{position:relative}
 .menu{position:absolute;right:0;top:42px;z-index:20;width:268px;padding:6px;border-radius:14px;background:var(--surface);box-shadow:0 22px 50px -18px rgba(23,22,26,.4),0 0 0 1px var(--line);transform-origin:top right;animation:pop .18s var(--ease) both}
 .menu[hidden]{display:none}
-.tabs{display:flex;gap:2px;padding:2px;border-radius:9px;background:var(--paper)}
-.tab{height:26px;padding:0 10px;white-space:nowrap;flex:none;border-radius:7px;font-size:12.5px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:5px}
+.tabs{display:flex;gap:2px;align-self:stretch}
+.tab{position:relative;height:42px;padding:0 9px;white-space:nowrap;flex:none;font-size:12.5px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:5px}
 body.no-ai .ai-setting,body.no-ai .pop{display:none!important}
-.tab.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(23,22,26,.12)}
+.tab:hover{color:var(--ink)}
+.tab.on{color:var(--ink)}
+.tab.on::after{content:"";position:absolute;left:7px;right:7px;bottom:-1px;height:2px;border-radius:2px;background:var(--ink)}
 .tab em{font-style:normal;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--rec);color:#fff;font-size:10.5px;display:grid;place-items:center}
 .tab em[hidden]{display:none}
 body.tab-ai .feed,body.tab-ai .cite,body.tab-ai .jump,body.tab-ai #summary{display:none!important}
@@ -145,7 +140,7 @@ iframe{display:block;border:0;width:100%;height:100%}
 .panel{width:340px;flex:none;display:flex;flex-direction:column;min-height:0;border-radius:var(--radius);background:rgba(255,255,255,.72);
   backdrop-filter:blur(12px);box-shadow:0 0 0 1px var(--line);overflow:hidden;animation:rise .6s .1s var(--ease) both}
 body:not(.panel-open) .panel{display:none}
-.panel-head{display:flex;align-items:center;gap:8px;padding:14px 14px 10px 16px}
+.panel-head{display:flex;align-items:center;gap:8px;padding:4px 10px 0 9px;margin-bottom:6px;border-bottom:1px solid var(--line)}
 .panel-head h3{margin:0;font-size:13.5px;font-weight:650}
 .panel-head .spacer{flex:1}
 .panel-head .ghost{white-space:nowrap;flex:none}
@@ -171,6 +166,11 @@ body:not(.panel-open) .panel{display:none}
 .retry{color:var(--warn);font-weight:600;font-size:12px}
 .rawtoggle{height:22px;padding:0 8px;border-radius:6px;font-size:11.5px;color:var(--ink-2);box-shadow:inset 0 0 0 1px var(--line-2)}.rawtoggle[aria-pressed=true]{background:var(--ink);color:#fff;box-shadow:none}.rawtoggle[hidden]{display:none}
 .retry[hidden]{display:none}
+
+/* short confirmation, fades by itself */
+.notice{position:fixed;left:50%;top:64px;transform:translateX(-50%);z-index:31;max-width:min(560px,92vw);padding:9px 14px;border-radius:10px;background:var(--ink);color:#fff;font-size:13px;box-shadow:0 12px 30px -14px rgba(23,22,26,.6);overflow-wrap:anywhere;animation:pop .18s var(--ease) both}
+.notice[hidden]{display:none}
+.notice{--tx:-50%}
 
 /* toast */
 .toast{position:fixed;left:50%;top:70px;transform:translateX(-50%);z-index:30;max-width:min(560px,92vw);display:flex;align-items:center;gap:10px;padding:10px 12px 10px 14px;border-radius:12px;background:var(--warn-bg);color:var(--warn);font-size:13px;box-shadow:0 12px 30px -16px rgba(168,72,28,.5),0 0 0 1px rgba(168,72,28,.15);animation:pop .2s var(--ease) both}
@@ -226,40 +226,40 @@ body:not(.panel-open) .panel{display:none}
 @media (max-width:1080px){.panel{width:300px}.ai span{display:none}}
 /* Narrow pages (a side browser): one compact bar, so the board keeps as much height as possible; captions open over the board. */
 @media (max-width:900px){
-  .bar{grid-template-columns:minmax(0,1fr) auto auto;gap:8px;padding:8px 10px 6px}
-  .mark,.theme,.wave,#phase,.ai{display:none}
-  h1{font-size:14px}
-  .capsule{height:36px;gap:8px;padding:0 4px 0 12px}
-  .capsule .ctl{width:28px;height:28px}.capsule .end{height:28px;padding:0 10px}
-  .tools{gap:6px}.chip{height:30px;padding:0 9px}.icon{width:30px;height:30px}
+  .bar{padding:8px 10px 6px}
+  .when,.wave,#phase,.ai{display:none}
+  .bar{gap:8px}.ident{gap:8px}h1{font-size:14px}
+  .capsule{padding-left:10px}
+  .tools{gap:2px}.chip{height:30px;padding:0 9px}.icon{width:30px;height:30px}
   main{position:relative;padding:2px 6px 6px;gap:6px}
   .stage{--radius:12px}
   .panel{position:absolute;right:6px;top:2px;bottom:6px;z-index:15;width:min(340px,calc(100% - 12px));box-shadow:0 30px 60px -30px rgba(23,22,26,.5),0 0 0 1px var(--line);background:rgba(255,255,255,.96)}
   .listening{gap:10px}.orb{width:52px;height:52px}
 }
 @media (max-width:560px){
-  .bar{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"ident tools" "cap cap";row-gap:6px}
-  .ident{grid-area:ident}.tools{grid-area:tools}.capsule{grid-area:cap;justify-self:stretch;justify-content:space-between}
+  .bar{flex-wrap:wrap;row-gap:6px}.ident{display:contents}h1{flex:1 1 0}
+  .tools{order:2}
+  .capsule{order:3;flex:1 1 100%}.capsule .end{margin-left:auto}
   .chip small{display:none}.chip .label{max-width:72px;overflow:hidden;text-overflow:ellipsis}
   .panel{left:6px;right:6px;width:auto}
 }
-@media (max-height:420px){.theme{display:none}.bar{padding-top:6px;padding-bottom:4px}.capsule{height:34px}}
+@media (max-height:420px){.bar{padding-top:6px;padding-bottom:4px}}
 </style>
 </head>
 <body class="panel-open">
 <header class="bar">
   <div class="ident">
-    <div class="mark" aria-hidden="true"><i></i><i></i><i></i></div>
-    <div class="names"><h1 id="title">会议白板</h1><p class="theme wait" id="theme">正在连接…</p></div>
-    <div class="picker"><button class="icon" id="listBtn" aria-label="会议记录" aria-haspopup="menu" aria-expanded="false" title="会议记录"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M5.5 4h8M5.5 8h8M5.5 12h8"/><circle cx="2.6" cy="4" r=".6" fill="currentColor"/><circle cx="2.6" cy="8" r=".6" fill="currentColor"/><circle cx="2.6" cy="12" r=".6" fill="currentColor"/></svg></button><div class="menu meetings" id="meetings" role="menu" hidden></div></div>
-  </div>
-  <div class="capsule" id="capsule" data-phase="starting" role="group" aria-label="录音控制">
-    <span class="dot" aria-hidden="true"></span>
-    <span id="phase">连接中</span>
-    <span class="num" id="clock">00:00</span>
-    <span class="wave rec-only" id="wave" aria-hidden="true"></span>
-    <button class="ctl rec-only" id="pause" aria-label="暂停录音"></button>
-    <button class="end rec-only" id="stop"><svg width="10" height="10" viewBox="0 0 10 10"><rect width="10" height="10" rx="2" fill="currentColor"/></svg>结束</button>
+    <div class="picker"><button class="icon" id="listBtn" aria-label="会议记录" aria-haspopup="menu" aria-expanded="false" title="会议记录"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11a9 9 0 1 1 2.6 7M3 4v7h7M12 7v5l3 2"/></svg></button><div class="menu meetings" id="meetings" role="menu" hidden></div></div>
+    <h1 id="title">会议白板</h1>
+    <span class="when" id="when"></span>
+    <div class="capsule" id="capsule" data-phase="starting" role="group" aria-label="录音控制">
+      <span class="dot" aria-hidden="true"></span>
+      <span id="phase">连接中</span>
+      <span class="num" id="clock">00:00</span>
+      <span class="wave rec-only" id="wave" aria-hidden="true"></span>
+      <button class="ctl rec-only" id="pause" aria-label="暂停录音"></button>
+      <button class="end rec-only" id="stop">结束会议</button>
+    </div>
   </div>
   <div class="tools">
     <div class="ai" id="ai"><svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 0c.4 3.6 2.4 5.6 8 8-5.6 2.4-7.6 4.4-8 8-.4-3.6-2.4-5.6-8-8 5.6-2.4 7.6-4.4 8-8Z" fill="currentColor"/></svg><span id="aiText">准备中</span><em class="delta" id="delta" hidden></em></div>
@@ -267,10 +267,12 @@ body:not(.panel-open) .panel{display:none}
       <button class="chip" id="formBtn" aria-haspopup="menu" aria-expanded="false"><span class="label" id="formLabel">白板形式</span><small id="formBy"></small><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 3.5 5 6.5 8 3.5" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg></button>
       <div class="menu" id="menu" role="menu" hidden></div>
     </div>
-    <button class="icon" id="gear" aria-label="会议设置"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v1.8M8 12.7v1.8M14.5 8h-1.8M3.3 8H1.5M12.6 3.4l-1.3 1.3M4.7 11.3l-1.3 1.3M12.6 12.6l-1.3-1.3M4.7 4.7 3.4 3.4"/></svg></button>
-    <button class="icon" id="toggle" aria-label="显示或隐藏实时转写" aria-pressed="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="2.5" width="13" height="11" rx="2.5"/><path d="M10 2.5v11"/></svg></button>
+    <button class="icon" id="share" aria-label="分享纪要" title="分享纪要"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M7 8l5-5 5 5M5 12v9h14v-9"/></svg></button>
+    <button class="icon" id="gear" aria-label="会议设置" title="会议设置"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v1.8M8 12.7v1.8M14.5 8h-1.8M3.3 8H1.5M12.6 3.4l-1.3 1.3M4.7 11.3l-1.3 1.3M12.6 12.6l-1.3-1.3M4.7 4.7 3.4 3.4"/></svg></button>
+    <button class="icon" id="toggle" aria-label="显示或隐藏实时转写" title="显示或隐藏右侧栏" aria-pressed="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="2.5" width="13" height="11" rx="2.5"/><path d="M10 2.5v11"/></svg></button>
   </div>
 </header>
+<div class="notice" id="notice" role="status" hidden></div>
 <div class="toast" id="toast" role="alert" hidden><span id="toastText"></span><button id="toastClose" aria-label="关闭提示"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 2l6 6M8 2 2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></div>
 <div class="scrim" id="scrim" hidden></div>
 <aside class="drawer" id="drawer" hidden aria-label="会议设置"><header><h3>会议设置</h3><button class="icon" id="drawerClose" aria-label="关闭设置"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 2l6 6M8 2 2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></header>
@@ -315,12 +317,12 @@ body:not(.panel-open) .panel{display:none}
 </main>
 <script>
 const base=new URL('api',location.href);const $=id=>document.getElementById(id);
-const PHASE={starting:'正在打开麦克风',recording:'录音中',paused:'已暂停',stopping:'正在收尾',complete:'已结束',interrupted:'录音中断'};
+const PHASE={starting:'正在打开麦克风',recording:'正在录音',paused:'录音已暂停',stopping:'正在完成转写',complete:'会议已结束',interrupted:'录音已中断'};
 const FORMS=[['mindmap','思维导图','主题 → 议题 → 观点（默认）','✳'],['topics','议题分区','评审、决策、多个议题','▦'],['flow','流程线','步骤、流程、排期','→'],['matrix','方案对比','多个方案取舍','⊞'],['status','进度看板','站会、周会、进度同步','☰']];
 const ICON={pause:'<svg width="12" height="12" viewBox="0 0 12 12"><rect x="2" y="1.5" width="2.6" height="9" rx="1" fill="currentColor"/><rect x="7.4" y="1.5" width="2.6" height="9" rx="1" fill="currentColor"/></svg>',play:'<svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 1.8v8.4c0 .5.5.8.9.5l6.4-4.2a.6.6 0 0 0 0-1L3.9 1.3c-.4-.3-.9 0-.9.5Z" fill="currentColor"/></svg>'};
 let latest=null,busy=false,loaded='',level=0,stick=true,toastKey='',dismissed='',cited=new Set(),citeFor='',seenChange=0,deltaTimer=0;const rendered=new Map();
 const time=ms=>{const n=Math.max(0,Math.floor(ms/1000));const h=Math.floor(n/3600),m=Math.floor(n%3600/60),s=n%60;return (h?h+':'+String(m).padStart(2,'0'):String(m).padStart(2,'0'))+':'+String(s).padStart(2,'0')};
-const wave=$('wave');for(let i=0;i<14;i++)wave.append(document.createElement('i'));
+const wave=$('wave');for(let i=0;i<7;i++)wave.append(document.createElement('i'));
 for(const [form,name,hint,glyph] of FORMS){const b=document.createElement('button');b.setAttribute('role','menuitemradio');b.dataset.form=form;const g=document.createElement('span');g.className='glyph';g.textContent=glyph;const t=document.createElement('span');const n=document.createElement('b');n.textContent=name;const e=document.createElement('em');e.textContent=hint;t.append(n,e);b.append(g,t);b.onclick=()=>{closeMenu();post({action:'layout',form})};$('menu').append(b)}
 {const again=document.createElement('button');again.dataset.refresh='1';const g=document.createElement('span');g.className='glyph';g.textContent='↻';const t=document.createElement('span');const n=document.createElement('b');n.textContent='按当前形式重新整理全场';const e=document.createElement('em');e.textContent='合并重复、补齐分组小结；完成前保留当前白板';t.append(n,e);again.append(g,t);again.onclick=()=>{closeMenu();const p=latest&&latest.meeting&&latest.meeting.plan;if(p)post({action:'layout',form:p.form,refresh:true})};$('menu').append(again)}
 {const note=document.createElement('div');note.className='note';note.textContent='新会议默认使用设置里的形式；在这里切换后不再自动更换。';$('menu').append(note)}
@@ -337,7 +339,8 @@ function render(data){
   // Anything on the board besides the title counts, including cards the conversation wrote there itself.
   const hasBoard=(plan&&m.items.length)||data.boardItems>0;
   const preferred=FORMS.find(f=>f[0]===(latest.settings&&latest.settings.defaultForm))||FORMS[0];
-  $('theme').textContent=plan&&plan.theme?plan.theme:!plan?(live?'正在了解会议主题…':'本场内容不足以生成白板'):'会议主题整理中';$('theme').classList.toggle('wait',!plan||!plan.theme);
+  $('title').title=m.title+(plan&&plan.theme?'\n主题：'+plan.theme:'');
+  const started=new Date(m.startedAt);$('when').textContent=started.toLocaleDateString('zh-CN',{month:'long',day:'numeric'})+' '+started.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
   const cap=$('capsule');cap.dataset.phase=m.phase;$('phase').textContent=PHASE[m.phase]||'';
   $('pause').innerHTML=m.phase==='paused'?ICON.play:ICON.pause;$('pause').setAttribute('aria-label',m.phase==='paused'?'继续录音':'暂停录音');
   $('pause').disabled=busy||!['recording','paused'].includes(m.phase);$('stop').disabled=busy||!['recording','paused','starting'].includes(m.phase);
@@ -466,10 +469,18 @@ function renderMinutes(m){const box=$('minutes');const mi=m.minutes;const key=JS
   const e=document.createElement('div');e.className='ai-empty';const b=document.createElement('b');b.textContent=mi&&mi.state==='failed'?'纪要没有生成':'还没有会议纪要';e.append(b,document.createTextNode(mi&&mi.state==='failed'?(mi.error||'请重试'):s_live(m)?'会议结束后会自动生成，也可以现在先生成一版。':'按纪要规范整理会议概览、核心方向、关键决策和待办。'));e.append(make(mi&&mi.state==='failed'?'重新生成':'生成纪要'));if(minutesError){const x=document.createElement('div');x.className='err';x.textContent=minutesError;e.append(x)}box.append(e)}
 async function makeMinutes(){busy=true;minutesError='';try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'minutes'})});if(!r.ok){const j=await r.json().catch(()=>({}));throw Error(j.error||'纪要没有生成，请重试')}}catch(e){minutesError=e.message}finally{busy=false;await refresh()}}
 $('stop').onclick=()=>post({action:'stop'});$('summary').onclick=()=>post({action:'summarize'});$('retry').onclick=()=>post({action:'retry'});
+let noticeTimer=0;
+function notice(text,ms){$('notice').textContent=text;$('notice').hidden=false;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>$('notice').hidden=true,ms||3500)}
+// Sharing hands over the minutes as an HTML file on the clipboard, ready to paste into a chat.
+$('share').onclick=async()=>{const m=latest&&latest.meeting;if(!m)return;
+  if(!(m.minutes&&m.minutes.markdown)){notice('还没有会议纪要，请先生成纪要再分享');setTab('minutes');return}
+  $('share').disabled=true;try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'share'})});const j=await r.json().catch(()=>({}));if(!r.ok)throw Error(j.error||'纪要没有分享成功，请重试');
+    notice(j.copied?'纪要文件已复制，可直接粘贴发送给别人':'没能复制到剪贴板，纪要文件已保存在 '+j.path,j.copied?3500:9000)}
+  catch(e){notice(e.message,6000)}finally{$('share').disabled=false}};
 $('toggle').onclick=()=>{const open=document.body.classList.toggle('panel-open');$('toggle').setAttribute('aria-pressed',String(open))};
 if(matchMedia('(max-width:900px)').matches){document.body.classList.remove('panel-open');$('toggle').setAttribute('aria-pressed','false')}
 setInterval(()=>{const m=latest&&latest.meeting;if(m)$('clock').textContent=time((m.endedAt||Date.now())-m.startedAt)},1000);
-setInterval(()=>{const m=latest&&latest.meeting;const on=m&&m.phase==='recording';let i=0;for(const bar of wave.children){const shape=.55+.45*Math.sin(Date.now()/180+i*1.3);bar.style.height=on?Math.max(3,Math.round(3+19*level*shape*(.6+Math.random()*.4)))+'px':'3px';i++}},120);
+setInterval(()=>{const m=latest&&latest.meeting;const on=m&&m.phase==='recording';let i=0;for(const bar of wave.children){const shape=.55+.45*Math.sin(Date.now()/180+i*1.3);bar.style.height=on?Math.max(3,Math.round(3+11*level*shape*(.6+Math.random()*.4)))+'px':'3px';i++}},120);
 
 async function pollSelection(){const m=latest&&latest.meeting;if(!m){return}try{const r=await fetch(new URL('api/selection',location.href),{cache:'no-store'});if(!r.ok)return;const data=await r.json();const pick=[...data.selected].reverse().map(id=>resolvePick(id,m)).find(Boolean);const keyNow=pick?pick.id+'|'+pick.refs.join(','):'';if(keyNow===citeFor)return;citeFor=keyNow;showCite(pick,m)}catch{}}
 const SUBS={proposal:'提出的方案',risk:'风险与顾虑'};const OUT=['decision','action','question'];const subOf=i=>i.sub||SUBS[i.kind]||'讨论要点';

@@ -1229,6 +1229,17 @@ var MINUTES_MIN_CHARS = 60;
 var MUST_DECIDE_AFTER_MS = 3e5;
 var COMPACT_BELOW_PX = 960;
 var VIEWPORT_TTL_MS = 6e4;
+function copyFileToClipboard(file) {
+  if (process.env.MEETING_SHARE_CLIPBOARD === "off") return Promise.resolve(false);
+  const command = process.platform === "darwin" ? ["osascript", ["-l", "JavaScript", "-e", "function run(argv){ObjC.import('AppKit');const board=$.NSPasteboard.generalPasteboard;board.clearContents;return board.writeObjects($([$.NSURL.fileURLWithPath(argv[0])]))}", file], process.env] : process.platform === "win32" ? ["powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Set-Clipboard -LiteralPath $env:MEETING_SHARE_FILE"], { ...process.env, MEETING_SHARE_FILE: file }] : null;
+  if (!command) return Promise.resolve(false);
+  const [binary, args, env2] = command;
+  return new Promise((resolve) => execFile(binary, args, { timeout: 1e4, env: env2, windowsHide: true }, (error, stdout) => resolve(!error && !/^false/.test(String(stdout).trim()))));
+}
+function shareName(title) {
+  const safe = title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim().replace(/^\.+/, "").slice(0, 60).trim();
+  return (safe || "\u4F1A\u8BAE") + "-\u4F1A\u8BAE\u7EAA\u8981.html";
+}
 function parseTranscript(output) {
   if (/No speech detected, skipping transcription\./.test(output)) return "";
   const match = output.match(/Processing \d+ samples \([\d.]+s\)\.\.\.[\s\S]*?\n\s*\n([\s\S]*)$/);
@@ -1994,6 +2005,19 @@ var MeetingController = class {
     const file = path2.join(directory, record.id + "-\u7EAA\u8981.html");
     await writeFile(file, minutesDocument(record.minutes.markdown, record.title, minutesMeta(record.startedAt, record.endedAt)), { mode: 384 });
     return { path: file };
+  }
+  /** Minutes as an HTML file named after the meeting, put on the clipboard as a file to paste into a chat. */
+  async share(id2) {
+    const record = this.records.get(id2);
+    if (!record?.minutes?.markdown) throw Error("\u8FD9\u573A\u4F1A\u8BAE\u8FD8\u6CA1\u6709\u4F1A\u8BAE\u7EAA\u8981\uFF0C\u8BF7\u5148\u751F\u6210");
+    const directory = path2.join(this.deps.data, "exports", "share", record.id);
+    await mkdir2(directory, { recursive: true, mode: 448 });
+    const name = shareName(record.title);
+    const file = path2.join(directory, name);
+    await writeFile(file, minutesDocument(record.minutes.markdown, record.title, minutesMeta(record.startedAt, record.endedAt)), { mode: 384 });
+    const copied = await copyFileToClipboard(file);
+    this.deps.log("minutes_shared", { success: copied });
+    return { path: file, name, copied };
   }
   taskRunner = null;
   /** Looks at the newest speech for requests to AI 助手 and queues them; one detection at a time per meeting. */
@@ -2981,6 +3005,15 @@ var MeetingBrowser = class {
               }
               return;
             }
+            if (body.action === "share") {
+              try {
+                response.end(JSON.stringify(await this.controller.share(meetingId)));
+              } catch (error) {
+                response.writeHead(400);
+                response.end(JSON.stringify({ error: error instanceof Error ? error.message : "\u7EAA\u8981\u6CA1\u6709\u5206\u4EAB\u6210\u529F" }));
+              }
+              return;
+            }
             if (this.controller.snapshot().meeting?.id !== meetingId) throw Error("\u6B64\u9875\u9762\u4E0D\u662F\u5F53\u524D\u5F55\u97F3\u4F1A\u8BAE\uFF0C\u8BF7\u56DE\u5230\u5BF9\u5E94\u4F1A\u8BDD");
             if (body.action === "summarize") this.controller.summarizeNow();
             else if (body.action === "retry") await this.controller.retry();
@@ -3219,7 +3252,7 @@ function cliSessions(runner2, cwd, spawnFn = spawn2) {
 }
 
 // src/mcp/server.ts
-var VERSION = "1.4.1";
+var VERSION = "1.4.2";
 console.log = console.info = (...args) => console.error(...args);
 var env = process.env;
 var home = path5.resolve(env.MEETING_ASSISTANT_HOME || path5.join(os4.homedir(), ".meeting-assistant"));

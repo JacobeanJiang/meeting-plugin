@@ -59,6 +59,11 @@ export class MeetingBrowser {
             catch (error) { response.writeHead(400); response.end(JSON.stringify({ error: error instanceof Error ? error.message : "纪要没有生成" })); }
             return;
           }
+          if (body.action === "share") {
+            try { response.end(JSON.stringify(await this.controller.share(meetingId))); }
+            catch (error) { response.writeHead(400); response.end(JSON.stringify({ error: error instanceof Error ? error.message : "纪要没有分享成功" })); }
+            return;
+          }
           if (this.controller.snapshot().meeting?.id !== meetingId) throw Error("此页面不是当前录音会议，请回到对应会话");
           if (body.action === "summarize") this.controller.summarizeNow();
           else if (body.action === "retry") await this.controller.retry();
