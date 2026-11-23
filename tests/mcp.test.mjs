@@ -23,7 +23,7 @@ async function start(env = {}) {
 }
 /** One agent session: its own server process on the given data folder, as an agent app starts one per conversation. */
 function connect(home, env = {}) {
-  const child = spawn(process.execPath, [server], { env: { ...process.env, MEETING_ASSISTANT_HOME: home, XDG_DATA_HOME: path.join(home, 'xdg'), MEETING_OPEN_BROWSER: '0', MEETING_LLM_API_KEY: '', OPENAI_API_KEY: '', MEETING_LLM_BASE_URL: '', MEETING_TASK_RUNNER: 'off', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [server], { env: { ...process.env, MEETING_ASSISTANT_HOME: home, XDG_DATA_HOME: path.join(home, 'xdg'), MEETING_OPEN_BROWSER: '0', MEETING_LLM_API_KEY: '', OPENAI_API_KEY: '', MEETING_LLM_BASE_URL: '', MEETING_ASR_MODEL: '', MEETING_ASR_BASE_URL: '', MEETING_ASR_API_KEY: '', MEETING_TASK_RUNNER: 'off', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
   const pending = new Map(); let next = 1; const stray = [];
   createInterface({ input: child.stdout }).on('line', line => { let message; try { message = JSON.parse(line); } catch { stray.push(line); return; } pending.get(message.id)?.(message); pending.delete(message.id); });
   const request = (method, params) => new Promise((resolve, reject) => { const n = next++; const timer = setTimeout(() => reject(Error('timeout ' + method)), 20000); pending.set(n, message => { clearTimeout(timer); resolve(message); }); child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: n, method, params }) + '\n'); });
@@ -136,3 +136,19 @@ test('with an agent CLI installed, work asked for in the meeting is on; every ag
     assert.deepEqual(second.stray, []);
   } finally { await second?.end(); await rm(t.home, { recursive: true, force: true }); await rm(bin, { recursive: true, force: true }); }
 });
+
+test('cloud speech recognition is off unless a transcription model is configured, and the meeting page offers the choice only then', async () => {
+  const t = await start();
+  try {
+    const off = await t.call('meeting_open', { id });
+    assert.equal(off.value.speechRecognition, '本机识别');
+    assert.equal((await (await fetch(new URL('api/settings', off.value.url))).json()).environment.cloudAsr, false);
+  } finally { await t.close(); }
+  const u = await start({ MEETING_ASR_MODEL: 'whisper-1', MEETING_ASR_BASE_URL: 'http://127.0.0.1:9/v1', MEETING_ASR_API_KEY: 'k' });
+  try {
+    const on = await u.call('meeting_open', { id });
+    assert.match(on.value.speechRecognition, /^whisper-1（云端接口/);
+    assert.equal((await (await fetch(new URL('api/settings', on.value.url))).json()).environment.cloudAsr, true);
+  } finally { await u.close(); }
+});
+

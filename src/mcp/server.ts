@@ -26,8 +26,9 @@ import { BOARD_FORMS, setupText, type Snapshot } from "../shared";
 import type { Generate } from "../server/summary";
 import { wakePattern, type Assistant } from "../server/tasks";
 import { cliGenerate, cliSessions, listModels, pickRunner, type ModelChoice } from "./runner";
+import { apiAsrConfig, apiTranscriber } from "../server/api-asr";
 
-const VERSION = "1.5.1";
+const VERSION = "1.6.0";
 // stdout carries the protocol only; anything else a dependency prints goes to stderr.
 console.log = console.info = (...args: unknown[]) => console.error(...args);
 const env = process.env;
@@ -45,6 +46,8 @@ const llm = {
   model: env.MEETING_LLM_MODEL || "gpt-4.1-mini",
 };
 const llmReady = Boolean(llm.key || env.MEETING_LLM_BASE_URL);
+/** Cloud speech recognition: only when a transcription model is configured (MEETING_ASR_MODEL); otherwise the local recogniser. */
+const asrApi = apiAsrConfig(env);
 const llmGenerate: Generate = async ({ prompt, instructions, model }) => {
   const response = await fetch(llm.url, { method: "POST", signal: AbortSignal.timeout(90000),
     headers: { "content-type": "application/json", ...(llm.key ? { authorization: "Bearer " + llm.key } : {}) },
@@ -147,6 +150,7 @@ async function startPrimary(): Promise<Handlers> {
     recorderPath: here(windows ? "../native/meeting-recorder.exe" : "../native/meeting-recorder"),
     voxtypePath: here("../native/voxtype"),
     whisperPaths: ["../native/whisper-cli.exe", "../native/whisper-cli-compat.exe"].map(here),
+    ...(asrApi ? { cloudTranscribe: apiTranscriber(asrApi) } : {}),
   });
   controller = meetings;
   await meetings.initialize();
@@ -201,7 +205,7 @@ async function startPrimary(): Promise<Handlers> {
   const page = async (id: string, open: boolean) => {
     const snapshot = meetings.view(id); await boards.sync(snapshot).catch(() => undefined);
     const url = await browser.open(id);
-    return { id, title: snapshot.meeting!.title, phase: snapshot.meeting!.phase, url, openedInBrowser: open ? openInBrowser(url) : false, setupNotice: setupText(snapshot.setup), organisingModel: organiserLabel, taskRunner: runner?.name ?? null, assistantName };
+    return { id, title: snapshot.meeting!.title, phase: snapshot.meeting!.phase, url, openedInBrowser: open ? openInBrowser(url) : false, setupNotice: setupText(snapshot.setup), organisingModel: organiserLabel, speechRecognition: asrApi ? asrApi.model + "（云端接口，失败时改用本机）" : "本机识别", taskRunner: runner?.name ?? null, assistantName };
   };
   const read = async (input: unknown) => {
     const id = meetingId(input); const r = object(input);
