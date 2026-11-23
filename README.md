@@ -3,7 +3,7 @@
 为 AI 编程助手准备的会议工具：在会话里说一声“开始开会”，它就用本机麦克风录音、在本地实时转写，把讨论自动整理成白板，会中随时回答“刚才说到哪了”，会后按规范写出会议纪要。
 
 <p align="center"><a href="https://github.com/JacobeanJiang/meeting-plugin/raw/main/assets/demo.mp4"><img src="https://raw.githubusercontent.com/JacobeanJiang/meeting-plugin/main/assets/demo.webp" alt="Meeting Assistant 演示：实时转写、思维导图白板、会中 AI 执行、会议纪要与分享" width="880"></a></p>
-<p align="center"><a href="https://github.com/JacobeanJiang/meeting-plugin/raw/main/assets/demo.mp4">下载高清版（MP4，1080p，45 秒）</a></p>
+<p align="center"><a href="https://github.com/JacobeanJiang/meeting-plugin/raw/main/assets/demo.mp4">下载高清版（MP4，1080p，36 秒，有音效）</a></p>
 
 可以作为 **Codex、Claude Code 插件**一键安装，也可以作为 [MCP](https://modelcontextprotocol.io) 服务接入 **Codex、Claude Code、Cursor**，以及 Windsurf、Cline、Continue 等任何支持 MCP（stdio）的 Agent。
 
