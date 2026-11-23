@@ -10,6 +10,8 @@ export type Settings = {
   rewrite: boolean;
   /** Model for proofreading; null uses the platform's default model. */
   rewriteModel: string | null;
+  /** Speech recognition: the host's cloud recogniser (falls back to this computer when it fails) or this computer only. */
+  asrEngine: "cloud" | "local";
   /** Situations the person describes in their own words; when the meeting gets there, the assistant does the work they set, without being named. */
   scenarios: Scenario[];
 };
@@ -23,7 +25,7 @@ export const SCENARIO_EXAMPLES: { when: string; action: string }[] = [
   { when: "有人问到具体数据，但会上没人能马上回答", action: "查询相关数据，给出结论和数据来源" },
   { when: "会上定下了待办和负责人", action: "整理成待办清单：事项、负责人、截止时间" },
 ];
-export const DEFAULT_SETTINGS: Settings = { binaryPath: "", model: null, autoSummary: true, chunkSecs: 15, asrModel: null, language: "zh", script: "simplified", vocabulary: "", vad: "standard", cleanup: true, defaultForm: "mindmap", aiTasks: true, rewrite: true, rewriteModel: null, scenarios: [] };
+export const DEFAULT_SETTINGS: Settings = { binaryPath: "", model: null, autoSummary: true, chunkSecs: 15, asrModel: null, language: "zh", script: "simplified", vocabulary: "", vad: "standard", cleanup: true, defaultForm: "mindmap", aiTasks: true, rewrite: true, rewriteModel: null, asrEngine: "cloud", scenarios: [] };
 export type Segment = {
   id: string; seq: number; startMs: number; endMs: number;
   status: "pending" | "transcribing" | "done" | "empty" | "failed";
@@ -106,7 +108,7 @@ export type AiTask = { id: string; instruction: string; quote: string; refs: str
 /** Recognition model preparation, done automatically after install: checking, downloading with progress, ready, or failed with a reason. */
 export type Setup = { status: "checking" | "downloading" | "ready" | "failed"; model: string; received: number; total: number; error: string | null };
 export type Snapshot = { settings: Settings; meeting: Meeting | null; levelDbfs: number | null; pending: number; history: { id: string; title: string; startedAt: number; phase: string; theme: string }[]; setup: Setup };
-export type Environment = { supported: boolean; binary: string | null; version: string | null; error: string | null; asrModels: string[]; defaultAsrModel: string | null; setup: Setup; asrChoices: { name: string; label: string }[] };
+export type Environment = { supported: boolean; binary: string | null; version: string | null; error: string | null; asrModels: string[]; defaultAsrModel: string | null; setup: Setup; asrChoices: { name: string; label: string }[]; cloudAsr?: boolean };
 /** Models the plugin downloads by itself, for the settings menus. */
 export const ASR_CHOICES: { name: string; label: string }[] = [{ name: "large-v3-turbo-q5_0", label: "推荐 · 574MB" }, { name: "large-v3-turbo", label: "更准 · 1.6GB" }, { name: "small", label: "较快 · 488MB" }];
 /** Windows recognises on the CPU: small keeps up with a live meeting, the large models need a fast processor. */

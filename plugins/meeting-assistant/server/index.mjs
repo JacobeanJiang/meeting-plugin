@@ -37,6 +37,61 @@ function asrPrompt(settings, assistantName2 = "AI \u52A9\u624B") {
   return base + (settings.language === "en" ? " Terms that may appear: " + terms.join(", ") + "." : "\u4F1A\u8BAE\u4E2D\u53EF\u80FD\u51FA\u73B0\u7684\u8BCD\uFF1A" + terms.join("\u3001") + "\u3002");
 }
 var RETRY_PROMPT = "\u4EE5\u4E0B\u662F\u666E\u901A\u8BDD\u7684\u53E5\u5B50\u3002";
+var SEPARATOR = /[\s\p{P}\p{S}]/u;
+function compact(text) {
+  let value = "";
+  const at = [];
+  [...text].reduce((offset, char) => {
+    if (!SEPARATOR.test(char)) {
+      value += char.toLowerCase();
+      at.push(offset);
+    }
+    return offset + char.length;
+  }, 0);
+  return { value, at };
+}
+function echoPieces(prompts) {
+  const pieces = /* @__PURE__ */ new Map();
+  for (const prompt of prompts) {
+    for (const sentence of prompt.split(/(?<=[。.!?！？])/)) {
+      const colon = Math.max(sentence.lastIndexOf("\uFF1A"), sentence.lastIndexOf(":"));
+      if (colon >= 0) {
+        const label = [...compact(sentence.slice(0, colon)).value], terms = compact(sentence.slice(colon + 1)).value;
+        if (!terms) continue;
+        for (let start = 0; start < label.length; start++) pieces.set(label.slice(start).join("") + terms, true);
+      } else {
+        const words = [...compact(sentence).value];
+        for (let start = 0; start + 6 <= words.length; start++) if (!pieces.has(words.slice(start).join(""))) pieces.set(words.slice(start).join(""), false);
+      }
+    }
+  }
+  return [...pieces].map(([text, labelled]) => ({ text, labelled })).sort((a2, b2) => b2.text.length - a2.text.length);
+}
+function stripPromptEcho(text, prompts) {
+  const pieces = echoPieces(prompts.filter(Boolean));
+  let value = text.trim();
+  let found = false;
+  for (let changed = true; changed && value; ) {
+    changed = false;
+    const { value: flat, at } = compact(value);
+    for (const piece of pieces) {
+      const index = flat.indexOf(piece.text);
+      if (index < 0) continue;
+      const last = at[index + piece.text.length - 1];
+      const end = last + [...value.slice(last)][0].length;
+      const atEdge = index === 0 || index + piece.text.length === flat.length;
+      if (!atEdge && !(piece.labelled && /^\s*[。.!！?？]/u.test(value.slice(end)))) continue;
+      const before = value.slice(0, at[index]).replace(/[\s，,、：:；;]+$/u, "");
+      const after = value.slice(end).replace(/^[\s\p{P}\p{S}]+/u, "");
+      const join = before && after && !/[\p{P}]$/u.test(before) ? "\u3002" : "";
+      value = (before + join + after).trim();
+      changed = true;
+      found = true;
+      break;
+    }
+  }
+  return found && [...compact(value).value].length <= 3 ? "" : value;
+}
 function asrConfig(model, settings, vadModel = null, prompt = asrPrompt(settings)) {
   const vad = VAD[settings.vad];
   return '[hotkey]\nenabled = false\n[whisper]\nmode = "local"\nmodel = ' + JSON.stringify(model) + "\nlanguage = " + JSON.stringify(settings.language) + "\ntranslate = false" + (prompt ? "\ninitial_prompt = " + JSON.stringify(prompt) : "") + '\n[output]\nmode = "clipboard"\n[vad]\nenabled = true\nbackend = "whisper"\nthreshold = ' + vad.threshold + "\nmin_speech_duration_ms = " + vad.minMs + "\n" + (vadModel ? "model = " + JSON.stringify(vadModel) + "\n" : "");
@@ -94,7 +149,7 @@ function acceptRewrite(raw, fixed) {
 // src/shared.ts
 var SCENARIO_LIMIT = 8;
 var SCENARIO_TEXT_LIMIT = 200;
-var DEFAULT_SETTINGS = { binaryPath: "", model: null, autoSummary: true, chunkSecs: 15, asrModel: null, language: "zh", script: "simplified", vocabulary: "", vad: "standard", cleanup: true, defaultForm: "mindmap", aiTasks: true, rewrite: true, rewriteModel: null, scenarios: [] };
+var DEFAULT_SETTINGS = { binaryPath: "", model: null, autoSummary: true, chunkSecs: 15, asrModel: null, language: "zh", script: "simplified", vocabulary: "", vad: "standard", cleanup: true, defaultForm: "mindmap", aiTasks: true, rewrite: true, rewriteModel: null, asrEngine: "cloud", scenarios: [] };
 var DEFAULT_TOPIC = "\u7EFC\u5408\u8BA8\u8BBA";
 var BOARD_FORMS = ["topics", "mindmap", "flow", "matrix", "status"];
 var FORM_LABEL = { topics: "\u8BAE\u9898\u5206\u533A", mindmap: "\u601D\u7EF4\u5BFC\u56FE", flow: "\u6D41\u7A0B\u7EBF", matrix: "\u65B9\u6848\u5BF9\u6BD4", status: "\u8FDB\u5EA6\u770B\u677F" };
@@ -1293,8 +1348,8 @@ var NOISE_PATTERNS = [
   /^(请|請)?(订阅|訂閱)(我的)?(频道|頻道)$/
 ];
 function isNoiseTranscript(text) {
-  const compact = text.replace(/[\s\p{P}\p{S}]/gu, "");
-  return !compact || compact.length <= 40 && NOISE_PATTERNS.some((pattern) => pattern.test(compact));
+  const compact2 = text.replace(/[\s\p{P}\p{S}]/gu, "");
+  return !compact2 || compact2.length <= 40 && NOISE_PATTERNS.some((pattern) => pattern.test(compact2));
 }
 function convertWith(recorder) {
   return (text, to) => new Promise((resolve, reject) => {
@@ -1413,7 +1468,8 @@ var MeetingController = class {
           segment.status = "failed";
           segment.error = "\u4E0A\u6B21\u5904\u7406\u88AB\u4E2D\u65AD\uFF0C\u53EF\u91CD\u8BD5";
         }
-        for (const segment of record.segments) if (segment.status === "done" && isNoiseTranscript(segment.text)) {
+        for (const segment of record.segments) if (segment.status === "done") segment.text = stripPromptEcho(segment.text, this.echoPrompts());
+        for (const segment of record.segments) if (segment.status === "done" && (!segment.text || isNoiseTranscript(segment.text))) {
           segment.status = "empty";
           segment.text = "";
         }
@@ -1504,6 +1560,7 @@ var MeetingController = class {
       aiTasks: r2.aiTasks !== false,
       rewrite: r2.rewrite !== false,
       rewriteModel: typeof r2.rewriteModel === "string" && r2.rewriteModel.trim() ? r2.rewriteModel.trim().slice(0, 256) : null,
+      asrEngine: r2.asrEngine === "local" ? "local" : "cloud",
       scenarios: normalizeScenarios(r2.scenarios)
     };
   }
@@ -1571,7 +1628,7 @@ var MeetingController = class {
     const supported = ["darwin", "win32"].includes(this.platform);
     const binary = await this.binary();
     const setup = this.models.state;
-    const base = { supported, binary, version: null, asrModels: [], defaultAsrModel: null, setup, asrChoices: asrChoicesFor(this.platform) };
+    const base = { supported, binary, version: null, asrModels: [], defaultAsrModel: null, setup, asrChoices: asrChoicesFor(this.platform), cloudAsr: Boolean(this.deps.cloudTranscribe) };
     if (!supported) return { ...base, error: "\u76EE\u524D\u53EA\u652F\u6301 macOS \u548C Windows" };
     if (!binary) return { ...base, error: this.windows ? "\u8BC6\u522B\u7A0B\u5E8F\u65E0\u6CD5\u5728\u8FD9\u53F0\u7535\u8111\u4E0A\u8FD0\u884C\uFF0C\u8BF7\u91CD\u65B0\u5B89\u88C5\u4F1A\u8BAE\u52A9\u624B" : "\u4F1A\u8BAE\u52A9\u624B\u5185\u7F6E\u7684\u8BC6\u522B\u7A0B\u5E8F\u7F3A\u5931\uFF0C\u8BF7\u91CD\u65B0\u5B89\u88C5\u4F1A\u8BAE\u52A9\u624B" };
     let version;
@@ -1849,7 +1906,7 @@ var MeetingController = class {
   }
   async drain() {
     if (this.processing || this.disposed || !this.current) return;
-    if (this.models.state.status !== "ready") {
+    if (this.models.state.status !== "ready" && !this.useCloud()) {
       if (this.models.state.status === "failed") return;
       try {
         if (this.windows) await this.models.ensure(this.current.asrModel);
@@ -1868,13 +1925,19 @@ var MeetingController = class {
         this.emit();
         await this.persist(record);
         try {
-          const binary = await this.binary();
-          if (!binary) throw Error("\u672A\u627E\u5230 voxtype");
           const file = record.audioFiles[segment.id];
           if (!file) throw Error("\u672A\u627E\u5230\u5F85\u8F6C\u5199\u97F3\u9891");
-          let raw;
-          if (this.windows) raw = await this.transcribeWindows(binary, record, file);
-          else {
+          let raw = null;
+          if (this.useCloud()) raw = await this.cloudSegment(record, segment, file);
+          const cloud = raw !== null;
+          if (cloud) {
+          } else if (this.windows) {
+            const binary = await this.binary();
+            if (!binary) throw Error("\u672A\u627E\u5230\u8BC6\u522B\u7A0B\u5E8F");
+            raw = await this.transcribeWindows(binary, record, file);
+          } else {
+            const binary = await this.binary();
+            if (!binary) throw Error("\u672A\u627E\u5230 voxtype");
             await this.writeConfig(record);
             let output;
             try {
@@ -1887,6 +1950,7 @@ var MeetingController = class {
             }
             raw = parseTranscript(output);
           }
+          if (raw) raw = stripPromptEcho(raw, this.echoPrompts());
           const polished = raw ? await polishTranscript(raw, this.settings, this.deps.convert ?? (this.windows ? convertOpenCC : convertWith(this.deps.recorderPath))) : "";
           const text = isNoiseTranscript(polished) ? "" : polished;
           if (this.disposed) break;
@@ -1895,7 +1959,7 @@ var MeetingController = class {
           segment.status = text ? "done" : "empty";
           segment.error = null;
           segment.raw = null;
-          segment.rewrite = text && this.settings.rewrite ? "pending" : null;
+          segment.rewrite = text && this.settings.rewrite && !cloud ? "pending" : null;
           await this.persist(record);
           await rm(file, { force: true });
           delete record.audioFiles[segment.id];
@@ -1919,6 +1983,31 @@ var MeetingController = class {
       this.processing = false;
       await this.maybeFinish();
       this.emit();
+    }
+  }
+  useCloud() {
+    return this.settings.asrEngine === "cloud" && Boolean(this.deps.cloudTranscribe);
+  }
+  /** The prompts the local recogniser may echo: the one with the meeting's terms, and the plain one used for a retry. */
+  echoPrompts() {
+    return [asrPrompt(this.settings, this.assistant.name), RETRY_PROMPT];
+  }
+  /** One segment through the cloud recogniser, with the meeting's terms and the previous segment as context; null when it failed. */
+  async cloudSegment(record, segment, file) {
+    const before = record.segments.filter((s) => s.status === "done" && s.seq < segment.seq && s.text).slice(-2).map((s) => s.text).join("");
+    const hotwords = vocabularyTerms(this.settings.vocabulary);
+    if (this.settings.aiTasks !== false) hotwords.unshift(this.assistant.name);
+    try {
+      const result = await this.deps.cloudTranscribe({ file, language: this.settings.language, hotwords, context: before });
+      this.deps.log("cloud_asr_completed", { count: result.text.length, success: true });
+      return result.text;
+    } catch {
+      this.deps.log("cloud_asr_failed", { success: false });
+      if (this.models.state.status !== "ready") {
+        if (this.windows) await this.models.ensure(record.asrModel);
+        else await this.writeConfig(record);
+      }
+      return null;
     }
   }
   async maybeFinish() {
@@ -2720,17 +2809,17 @@ function relations(out, links, items) {
 }
 function layoutBoard(meeting, removed = /* @__PURE__ */ new Set(), space = "normal") {
   const out = /* @__PURE__ */ new Map();
-  const compact = space === "compact";
-  out.set("meeting-title", { type: "text", x: LEFT, y: 40, wrap: compact ? COMPACT_W : 1600, text: meeting.title, size: "title", color: "ink", by: "agent" });
+  const compact2 = space === "compact";
+  out.set("meeting-title", { type: "text", x: LEFT, y: 40, wrap: compact2 ? COMPACT_W : 1600, text: meeting.title, size: "title", color: "ink", by: "agent" });
   const plan = meeting.plan;
-  if (plan?.theme) out.set("meeting-theme", { type: "text", x: LEFT, y: 118, wrap: compact ? COMPACT_W : 1600, text: "\u4E3B\u9898\uFF1A" + plan.theme, size: "large", color: "ink", by: "agent" });
+  if (plan?.theme) out.set("meeting-theme", { type: "text", x: LEFT, y: 118, wrap: compact2 ? COMPACT_W : 1600, text: "\u4E3B\u9898\uFF1A" + plan.theme, size: "large", color: "ink", by: "agent" });
   if (!plan) return out;
   const shown = meeting.items.filter((item) => !removed.has(elementId(item)));
   const folded = plan.form === "topics" || plan.form === "mindmap" ? shown.filter((item) => item.folded) : [];
   const items = shown.filter((item) => !folded.includes(item));
   const chapters = meeting.chapters ?? NO_CHAPTERS;
   const center = plan.center || plan.theme.slice(0, 16);
-  if (compact) switch (plan.form) {
+  if (compact2) switch (plan.form) {
     case "topics":
       topicGrid(out, items, meeting.summaries ?? [], TOP, chapters, folded, 2, COMPACT_COL_W);
       break;
@@ -3332,7 +3421,7 @@ function cliSessions(runner2, cwd, spawnFn = spawn2) {
 }
 
 // src/mcp/server.ts
-var VERSION = "1.5.0";
+var VERSION = "1.5.1";
 console.log = console.info = (...args) => console.error(...args);
 var env = process.env;
 var home = path5.resolve(env.MEETING_ASSISTANT_HOME || path5.join(os4.homedir(), ".meeting-assistant"));

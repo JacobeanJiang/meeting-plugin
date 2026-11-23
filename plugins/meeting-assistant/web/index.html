@@ -288,6 +288,7 @@ body:not(.panel-open) .panel{display:none}
 <aside class="drawer" id="drawer" hidden aria-label="会议设置"><header><h3>会议设置</h3><button class="icon" id="drawerClose" aria-label="关闭设置"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 2l6 6M8 2 2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button></header>
 <div class="body">
 <h4>语音识别</h4>
+<label id="sEngineRow" hidden>识别方式<select id="sEngine"><option value="cloud">云端识别（推荐，更准）</option><option value="local">本机识别：音频不出本机</option></select><small>云端识别失败时自动改用本机识别；云端会把会议录音发送到所用平台的模型网关。</small></label>
 <label>识别模型<select id="sAsr"></select></label>
 <label>会议语言<select id="sLang"><option value="zh">中文（普通话）</option><option value="auto">自动检测（中英夹杂时可试）</option><option value="en">英文</option><option value="ja">日语</option><option value="ko">韩语</option></select></label>
 <label>中文显示<select id="sScript"><option value="simplified">统一为简体</option><option value="traditional">统一为繁体</option><option value="original">保持识别原样</option></select></label>
@@ -514,6 +515,7 @@ setInterval(pollSelection,500);
 let current=null;
 let ASR_HINT={'large-v3-turbo-q5_0':'推荐 · 574MB','large-v3-turbo':'更准 · 1.6GB',small:'较快 · 488MB'};
 async function openSettings(){try{const r=await fetch(new URL('api/settings',location.href),{cache:'no-store'});if(!r.ok)throw Error();const data=await r.json();current=data.settings;const env=data.environment||{};if(env.asrChoices)ASR_HINT=Object.fromEntries(env.asrChoices.map(c=>[c.name,c.label]));
+  $('sEngineRow').hidden=!env.cloudAsr;$('sEngine').value=current.asrEngine==='local'?'local':'cloud';
   const sel=$('sAsr');sel.replaceChildren();const add=(v,t)=>{const o=document.createElement('option');o.value=v;o.textContent=t;sel.append(o)};add('','自动'+(env.defaultAsrModel?'（'+env.defaultAsrModel+'）':''));const have=env.asrModels||[];
   for(const name of new Set([...Object.keys(ASR_HINT),...have,...(current.asrModel?[current.asrModel]:[])]))add(name,name+(ASR_HINT[name]?' · '+ASR_HINT[name]:'')+(have.includes(name)?'（已安装）':'（选择后自动下载）'));
   sel.value=current.asrModel||'';$('sLang').value=current.language;$('sScript').value=current.script;$('sVocab').value=current.vocabulary;$('sVad').value=current.vad;$('sChunk').value=String(current.chunkSecs);$('sClean').checked=current.cleanup;$('sAuto').checked=current.autoSummary;$('sAiTasks').checked=current.aiTasks!==false;scenes=(current.scenarios||[]).map(x=>({...x}));paintScenes();$('sRewrite').checked=current.rewrite!==false;$('sRewriteModel').value=current.rewriteModel||'';fillModels(data.models||[],current.rewriteModel);syncRewrite();$('sForm').value=current.defaultForm;syncScript();
@@ -545,7 +547,7 @@ function paintScenes(){const list=$('sceneList');list.replaceChildren();
   $('sceneWarn').hidden=!scenes.some(x=>!x.when.trim()||!x.action.trim())}
 function addScene(when,action){scenes.push({id:'c'+Date.now().toString(36),when:when||'',action:action||'',confirm:true,enabled:true});paintScenes()}
 $('sceneAdd').onclick=()=>addScene();
-$('sSave').onclick=async()=>{if(!current)return;const next={...current,scenarios:scenes.map(x=>({...x,when:x.when.trim(),action:x.action.trim()})).filter(x=>x.when&&x.action),asrModel:$('sAsr').value||null,language:$('sLang').value,script:$('sScript').value,vocabulary:$('sVocab').value.trim(),vad:$('sVad').value,chunkSecs:Number($('sChunk').value),cleanup:$('sClean').checked,autoSummary:$('sAuto').checked,aiTasks:$('sAiTasks').checked,rewrite:$('sRewrite').checked,rewriteModel:chosenModel(),defaultForm:$('sForm').value};
+$('sSave').onclick=async()=>{if(!current)return;const next={...current,scenarios:scenes.map(x=>({...x,when:x.when.trim(),action:x.action.trim()})).filter(x=>x.when&&x.action),asrModel:$('sAsr').value||null,asrEngine:$('sEngine').value==='local'?'local':'cloud',language:$('sLang').value,script:$('sScript').value,vocabulary:$('sVocab').value.trim(),vad:$('sVad').value,chunkSecs:Number($('sChunk').value),cleanup:$('sClean').checked,autoSummary:$('sAuto').checked,aiTasks:$('sAiTasks').checked,rewrite:$('sRewrite').checked,rewriteModel:chosenModel(),defaultForm:$('sForm').value};
   $('sSave').disabled=true;try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'settings',settings:next})});if(!r.ok)throw Error();closeSettings()}catch{dismissed='';toast('设置没有保存成功，请重试')}finally{$('sSave').disabled=false}};
 let polling=false;setInterval(async()=>{if(!polling){polling=true;await refresh();polling=false}},1000);refresh();
 // ---- board size ----

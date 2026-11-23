@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { REWRITE_BATCH, acceptRewrite, rewriteSegments } from "./rewrite";
 import { asrChoicesFor, type AiTask, BOARD_FORMS, DEFAULT_SETTINGS, SCENARIO_LIMIT, SCENARIO_TEXT_LIMIT, type Scenario, DEFAULT_TOPIC, FORM_LABEL, markdown, type BoardForm, type BoardSpace, type Settings, type Meeting, type Snapshot, type Environment, type Segment } from "../shared";
-import { RETRY_PROMPT, VAD, asrConfig, asrPrompt, polishTranscript } from "./asr";
+import { RETRY_PROMPT, VAD, asrConfig, asrPrompt, polishTranscript, stripPromptEcho, vocabularyTerms } from "./asr";
 import * as OpenCC from "opencc-js";
 import { ModelStore, WINDOWS_DEFAULTS, type SetupState } from "./models";
 import { DEFAULT_ASSISTANT, detectTasks, mentionsAssistant, quickTasks, taskMessage, type Assistant } from "./tasks";
@@ -54,6 +54,8 @@ export type Deps = {
   organiseTimeoutMs?: number;
   /** Longest wait for one caption proofreading request (default 20 s, within the desktop host's limit per model call). */
   rewriteTimeoutMs?: number;
+  /** Cloud speech recognition supplied by the desktop host; absent means this computer recognises everything. */
+  cloudTranscribe?: (input: { file: string; language: string; hotwords: string[]; context: string }) => Promise<{ text: string; model: string }>;
   /** Chinese script conversion; defaults to the bundled recorder in text mode. */
   convert?: (text: string, to: "Hans" | "Hant") => Promise<string>;
 };
@@ -188,7 +190,9 @@ export class MeetingController {
           record.phase = "interrupted"; record.error = "上次录音已中断，已有转写保留；可重试尚未转写的音频。";
         }
         for (const segment of record.segments) if (["pending", "transcribing"].includes(segment.status)) { segment.status = "failed"; segment.error = "上次处理被中断，可重试"; }
-        for (const segment of record.segments) if (segment.status === "done" && isNoiseTranscript(segment.text)) { segment.status = "empty"; segment.text = ""; }
+        // Older captions can hold the recognition prompt written back on a quiet chunk ("词：AI 助手。"); clean them the same way.
+        for (const segment of record.segments) if (segment.status === "done") segment.text = stripPromptEcho(segment.text, this.echoPrompts());
+        for (const segment of record.segments) if (segment.status === "done" && (!segment.text || isNoiseTranscript(segment.text))) { segment.status = "empty"; segment.text = ""; }
         record.summaryState = "idle";
         record.asrModel ||= "large-v3-turbo";
         record.notes = Array.isArray(record.notes) ? record.notes.map(note => ({ ...note, topic: note.topic || DEFAULT_TOPIC })) : [];
@@ -252,6 +256,7 @@ export class MeetingController {
       vocabulary: typeof r.vocabulary === "string" ? r.vocabulary.slice(0, 500) : "", vad: pick(r.vad, ["strict", "standard", "loose"] as const, "standard"), cleanup: r.cleanup !== false,
       defaultForm: (r.defaultForm === "auto" ? "mindmap" : pick(r.defaultForm, ["topics", "mindmap", "flow", "matrix", "status"] as const, "mindmap")), aiTasks: r.aiTasks !== false,
       rewrite: r.rewrite !== false, rewriteModel: typeof r.rewriteModel === "string" && r.rewriteModel.trim() ? r.rewriteModel.trim().slice(0, 256) : null,
+      asrEngine: r.asrEngine === "local" ? "local" : "cloud",
       scenarios: normalizeScenarios(r.scenarios) };
   }
 
@@ -293,7 +298,7 @@ export class MeetingController {
     const supported = ["darwin", "win32"].includes(this.platform);
     const binary = await this.binary();
     const setup = this.models.state as SetupState;
-    const base = { supported, binary, version: null, asrModels: [] as string[], defaultAsrModel: null as string | null, setup, asrChoices: asrChoicesFor(this.platform) };
+    const base = { supported, binary, version: null, asrModels: [] as string[], defaultAsrModel: null as string | null, setup, asrChoices: asrChoicesFor(this.platform), cloudAsr: Boolean(this.deps.cloudTranscribe) };
     if (!supported) return { ...base, error: "目前只支持 macOS 和 Windows" };
     if (!binary) return { ...base, error: this.windows ? "识别程序无法在这台电脑上运行，请重新安装会议助手" : "会议助手内置的识别程序缺失，请重新安装会议助手" };
     let version: string;
@@ -464,7 +469,7 @@ export class MeetingController {
   private async drain(): Promise<void> {
     if (this.processing || this.disposed || !this.current) return;
     // While the model is still being prepared, audio waits on disk instead of failing segment by segment.
-    if (this.models.state.status !== "ready") {
+    if (this.models.state.status !== "ready" && !this.useCloud()) {
       if (this.models.state.status === "failed") return;
       try { if (this.windows) await this.models.ensure(this.current.asrModel); else await this.writeConfig(this.current); } catch { this.emit(); return; }
     }
@@ -475,11 +480,15 @@ export class MeetingController {
       while (!this.disposed && (segment = record.segments.find(s => s.status === "pending"))) {
         segment.status = "transcribing"; this.emit(); await this.persist(record);
         try {
-          const binary = await this.binary(); if (!binary) throw Error("未找到 voxtype");
           const file = record.audioFiles[segment.id]; if (!file) throw Error("未找到待转写音频");
-          let raw: string;
-          if (this.windows) raw = await this.transcribeWindows(binary, record, file);
+          let raw: string | null = null;
+          // The cloud recogniser first; any failure falls back to this computer so a segment is never lost to the network.
+          if (this.useCloud()) raw = await this.cloudSegment(record, segment, file);
+          const cloud = raw !== null;
+          if (cloud) { /* recognised in the cloud */ }
+          else if (this.windows) { const binary = await this.binary(); if (!binary) throw Error("未找到识别程序"); raw = await this.transcribeWindows(binary, record, file); }
           else {
+          const binary = await this.binary(); if (!binary) throw Error("未找到 voxtype");
           await this.writeConfig(record);
           let output: string;
           try { output = await this.run(binary, ["--config", this.configFile, "transcribe", file]); }
@@ -491,11 +500,13 @@ export class MeetingController {
           }
           raw = parseTranscript(output);
           }
+          // A quiet chunk can come back as the recognition prompt itself; that is not speech.
+          if (raw) raw = stripPromptEcho(raw, this.echoPrompts());
           const polished = raw ? await polishTranscript(raw, this.settings, this.deps.convert ?? (this.windows ? convertOpenCC : convertWith(this.deps.recorderPath))) : "";
           const text = isNoiseTranscript(polished) ? "" : polished;
           if (this.disposed) break;
           if (text.length > 35000) throw Error("转写过长，保留原音频供重试");
-          segment.text = text; segment.status = text ? "done" : "empty"; segment.error = null; segment.raw = null; segment.rewrite = text && this.settings.rewrite ? "pending" : null;
+          segment.text = text; segment.status = text ? "done" : "empty"; segment.error = null; segment.raw = null; segment.rewrite = text && this.settings.rewrite && !cloud ? "pending" : null; // cloud text is already cleaned with the meeting's terms and context
           await this.persist(record); // Preserve text before deleting source audio.
           await rm(file, { force: true }); delete record.audioFiles[segment.id];
           this.deps.log("segment_completed", { count: text.length, success: true });
@@ -513,6 +524,25 @@ export class MeetingController {
         await this.persist(record); this.emit();
       }
     } finally { this.processing = false; await this.maybeFinish(); this.emit(); }
+  }
+  private useCloud(): boolean { return this.settings.asrEngine === "cloud" && Boolean(this.deps.cloudTranscribe); }
+  /** The prompts the local recogniser may echo: the one with the meeting's terms, and the plain one used for a retry. */
+  private echoPrompts(): string[] { return [asrPrompt(this.settings, this.assistant.name), RETRY_PROMPT]; }
+  /** One segment through the cloud recogniser, with the meeting's terms and the previous segment as context; null when it failed. */
+  private async cloudSegment(record: Stored, segment: Segment, file: string): Promise<string | null> {
+    const before = record.segments.filter(s => s.status === "done" && s.seq < segment.seq && s.text).slice(-2).map(s => s.text).join("");
+    const hotwords = vocabularyTerms(this.settings.vocabulary);
+    if (this.settings.aiTasks !== false) hotwords.unshift(this.assistant.name);
+    try {
+      const result = await this.deps.cloudTranscribe!({ file, language: this.settings.language, hotwords, context: before });
+      this.deps.log("cloud_asr_completed", { count: result.text.length, success: true });
+      return result.text;
+    } catch {
+      this.deps.log("cloud_asr_failed", { success: false });
+      // The local engine takes over; it needs its model, which may still be downloading.
+      if (this.models.state.status !== "ready") { if (this.windows) await this.models.ensure(record.asrModel); else await this.writeConfig(record); }
+      return null;
+    }
   }
   private async maybeFinish(): Promise<void> {
     if (!this.current || this.disposed) return;

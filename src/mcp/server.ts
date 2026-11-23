@@ -27,7 +27,7 @@ import type { Generate } from "../server/summary";
 import { wakePattern, type Assistant } from "../server/tasks";
 import { cliGenerate, cliSessions, listModels, pickRunner, type ModelChoice } from "./runner";
 
-const VERSION = "1.5.0";
+const VERSION = "1.5.1";
 // stdout carries the protocol only; anything else a dependency prints goes to stderr.
 console.log = console.info = (...args: unknown[]) => console.error(...args);
 const env = process.env;
