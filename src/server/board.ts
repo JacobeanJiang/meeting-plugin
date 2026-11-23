@@ -73,6 +73,18 @@ export class MeetingBoards {
     const structural = (doc: Doc) => doc.data.by === "agent" && (doc.data.type === "arrow" || doc.data.type === "container" || doc.id === "mm-center");
     const untouched = (doc: Doc) => written[doc.id] === doc.sha256 || structural(doc);
     const desired = layoutBoard(meeting, new Set(link.deleted), this.space());
+    // Mind-map lines start at a point on their parent's edge (see branchLine): they go with a removed parent and start from
+    // where a person moved it, letting the board route the rest.
+    for (const [id, data] of desired) {
+      const anchor = data.anchor as { id: string; side: "left" | "right" } | undefined;
+      if (!anchor) continue;
+      delete data.anchor;
+      if (link.deleted.includes(anchor.id)) { desired.delete(id); continue; }
+      const parent = docs.get(anchor.id);
+      if (!parent || untouched(parent)) continue;
+      const { x, y, w, h } = parent.data as { x: number; y: number; w: number; h: number };
+      data.from = [Math.round(anchor.side === "right" ? x + w : x), Math.round(y + h / 2)];
+    }
     const writes: { op: "set" | "delete"; path: string; if_match: string | null; data?: Record<string, unknown> }[] = [];
     // An arrow needs both ends: when a person removed a node (a topic, a viewpoint, the centre), its lines go too.
     const gone = (end: unknown) => typeof end === "string" && link.deleted.includes(end);

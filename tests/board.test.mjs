@@ -98,7 +98,9 @@ test('mind map, flow, comparison and progress forms', async () => {
     assert.ok(docOf(board, 'it-i2').data.x + docOf(board, 'it-i2').data.w < topicOf('原因').data.x, 'left branch extends leftwards');
     assert.equal(board.documents.filter(doc => doc.id.startsWith('mm-a-')).length, 3, 'centre to each topic');
     assert.equal(board.documents.filter(doc => doc.id.startsWith('mm-e-')).length, 4, 'topic to each viewpoint');
-    assert.equal(docOf(board, 'mm-e-i3').data.from, docOf(board, 'mm-e-i2').data.from, 'viewpoints of one topic share its node');
+    assert.deepEqual(docOf(board, 'mm-e-i3').data.from, docOf(board, 'mm-e-i2').data.from, 'viewpoints of one topic start at one point, so their lines share one trunk');
+    const reason = topicOf('原因').data;
+    assert.deepEqual(docOf(board, 'mm-e-i2').data.from, [reason.x, reason.y + reason.h / 2], 'a left branch starts at the middle of its topic\'s left edge');
     assert.ok(!board.documents.some(doc => doc.id.startsWith('ln-') || doc.data.type === 'container'), 'no cross links or columns in the mind map');
     assert.match(docOf(board, 'it-i4').data.text, /\*\*结论\*\*/, 'viewpoint kind stays visible');
     const centerMid = center.y + center.h / 2, span = topics.map(doc => [doc.data.y, doc.data.y + doc.data.h]).flat();
@@ -201,7 +203,25 @@ test('removing a topic node in the editor drops its lines and syncing carries on
     board = await boards.read(id);
     assert.ok(!docOf(board, topic.id), 'removed topic stays removed');
     assert.ok(!board.documents.some(doc => doc.data.type === 'arrow' && (doc.data.from === topic.id || doc.data.to === topic.id)), 'no dangling lines');
+    assert.ok(!docOf(board, 'mm-e-i1'), 'lines from the removed topic to its viewpoints go too');
     assert.ok(docOf(board, 'it-i3'), 'later viewpoints still arrive');
+  } finally { await boards.close(); }
+});
+
+test('a mind-map line starts where a person moved its topic', async () => {
+  const boards = new MeetingBoards(path.join(scratch, 'd' + n), assets); const id = fresh();
+  try {
+    const items = [item('i1', '首页改版', 'point', '搜索框放第一期', ['s0']), item('i2', '首页改版', 'action', '小王出交互稿', ['s2'])];
+    const m = meeting(id, items, { plan: plan('mindmap', { center: '首页改版' }) });
+    await boards.sync(snap(m));
+    let board = await boards.read(id);
+    const topic = board.documents.find(doc => doc.id.startsWith('mm-t-'));
+    const moved = { ...topic.data, x: topic.data.x + 200, y: topic.data.y + 120 };
+    await boards.write(id, [{ op: 'set', path: 'elements/' + topic.id, if_match: topic.sha256, data: moved }]);
+    await boards.sync(snap({ ...m, items: [...items, item('i3', '首页改版', 'decision', '推荐位放二期', ['s3'])] }));
+    board = await boards.read(id);
+    assert.deepEqual(at(docOf(board, topic.id)), [moved.x, moved.y], 'the moved topic stays where the person put it');
+    for (const line of ['mm-e-i1', 'mm-e-i2', 'mm-e-i3']) assert.deepEqual(docOf(board, line).data.from, [moved.x + moved.w, moved.y + moved.h / 2], line + ' starts at the moved topic');
   } finally { await boards.close(); }
 });
 
@@ -226,7 +246,8 @@ test('switching a topics board to a mind map never leaves dangling lines, even w
     await boards.sync(snap({ ...m, plan: plan('mindmap', { center: '首页改版' }) }));
     board = await boards.read(id);
     const ids = new Set(board.documents.map(doc => doc.id));
-    for (const doc of board.documents.filter(doc => doc.data.type === 'arrow')) assert.ok(ids.has(doc.data.from) && ids.has(doc.data.to), 'every line has both ends: ' + doc.id);
+    const end = value => Array.isArray(value) || ids.has(value); // mind-map lines start at a point on their parent's edge
+    for (const doc of board.documents.filter(doc => doc.data.type === 'arrow')) assert.ok(end(doc.data.from) && end(doc.data.to), 'every line has both ends: ' + doc.id);
     assert.ok(!board.documents.some(doc => doc.id.startsWith('blk-') || doc.id.startsWith('ln-') || doc.id.startsWith('grp-')), 'topics structure is gone');
     assert.ok(docOf(board, 'mm-center') && board.documents.some(doc => doc.id.startsWith('mm-e-')), 'the mind map is drawn');
     assert.ok(!docOf(board, 'user-line'), 'a line whose end went away goes too');

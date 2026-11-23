@@ -175,6 +175,15 @@ function branches(items: BoardItem[], summaries: GroupSummary[], chapters: Chapt
   });
 }
 const foldNote = (count: number) => "已收起 " + count + " 条细节，问答和导出中仍可查到";
+/**
+ * A mind-map branch line from the middle of the parent's edge into the child. All children of one parent start at the
+ * same point, so the board routes them along one shared vertical line; tied to the parent node itself, the board fanned
+ * them out across its side into parallel tracks, which made branches look tangled. `anchor` names the parent, so the
+ * board sync can start the line where a person moved the parent and drop it when the parent is removed.
+ */
+function branchLine(parent: string, side: "left" | "right", at: [number, number], child: string, color: string): BoardElement {
+  return { type: "arrow", from: at.map(Math.round), anchor: { id: parent, side }, to: child, toSide: side === "right" ? "left" : "right", head: "none", color, by: "agent" };
+}
 function mindmap(out: Map<string, BoardElement>, items: BoardItem[], summaries: GroupSummary[], center: string, chapters: Chapters = NO_CHAPTERS, hidden: BoardItem[] = []): void {
   const centerX = LEFT + MM_LEAF_W + MM_GAP_X + MM_TOPIC_W + MM_GAP_X;
   const blocks = branches(items, summaries, chapters, hidden, MM_TOPIC_W, MM_LEAF_W, MINDMAP_LEAVES);
@@ -182,22 +191,25 @@ function mindmap(out: Map<string, BoardElement>, items: BoardItem[], summaries: 
   const height = Math.max(84, sideH(true), sideH(false));
   const centerText = center || "会议主题";
   const centerH = Math.max(84, leafHeight(centerText, MM_CENTER_W));
-  out.set("mm-center", { type: "shape", kind: "pill", color: TINT.white, stroke: "ink", x: centerX, y: TOP + (height - centerH) / 2, w: MM_CENTER_W, h: centerH, text: centerText, size: "large", by: "agent" });
+  const centerY = TOP + (height - centerH) / 2;
+  out.set("mm-center", { type: "shape", kind: "pill", color: TINT.white, stroke: "ink", x: centerX, y: centerY, w: MM_CENTER_W, h: centerH, text: centerText, size: "large", by: "agent" });
   for (const right of [true, false]) {
     let cursor = TOP + (height - sideH(right)) / 2;
     const topicX = right ? centerX + MM_CENTER_W + MM_GAP_X : centerX - MM_GAP_X - MM_TOPIC_W;
     const leafX = right ? topicX + MM_TOPIC_W + MM_GAP_X : topicX - MM_GAP_X - MM_LEAF_W;
-    const inner = right ? "right" : "left", outer = right ? "left" : "right";
+    const side = right ? "right" : "left";
+    const centerEdge = right ? centerX + MM_CENTER_W : centerX, topicEdge = right ? topicX + MM_TOPIC_W : topicX;
     for (const block of blocks.filter(entry => entry.right === right)) {
       const color = BRANCH[block.index % BRANCH.length];
       const topicId = topicNodeId(block.group);
-      out.set(topicId, { type: "shape", kind: "rounded", color: block.state === "已小结" ? TINT.paper : TINT.white, stroke: color, x: topicX, y: cursor + (block.blockH - block.topicH) / 2, w: MM_TOPIC_W, h: block.topicH, text: block.topicText, size: "body", textAlign: "left", by: "agent" });
-      out.set("mm-a-" + key(block.group), { type: "arrow", from: "mm-center", to: topicId, fromSide: inner, toSide: outer, head: "none", color, by: "agent" });
+      const topicY = cursor + (block.blockH - block.topicH) / 2;
+      out.set(topicId, { type: "shape", kind: "rounded", color: block.state === "已小结" ? TINT.paper : TINT.white, stroke: color, x: topicX, y: topicY, w: MM_TOPIC_W, h: block.topicH, text: block.topicText, size: "body", textAlign: "left", by: "agent" });
+      out.set("mm-a-" + key(block.group), branchLine("mm-center", side, [centerEdge, centerY + centerH / 2], topicId, color));
       let y = cursor + (block.blockH - block.leavesH) / 2;
       for (const leaf of block.leaves) {
         const style = STYLE[leaf.item.kind];
         out.set(elementId(leaf.item), { type: "shape", kind: "rounded", color: leaf.item.kind === "status" ? STATUS_TINT[leaf.item.group] ?? TINT.paper : style.color, ...(style.stroke ? { stroke: style.stroke } : {}), x: leafX, y, w: MM_LEAF_W, h: leaf.h, text: leaf.text, size: "body", textAlign: "left", by: "agent" });
-        out.set("mm-e-" + leaf.item.id, { type: "arrow", from: topicId, to: elementId(leaf.item), fromSide: inner, toSide: outer, head: "none", color, by: "agent" });
+        out.set("mm-e-" + leaf.item.id, branchLine(topicId, side, [topicEdge, topicY + block.topicH / 2], elementId(leaf.item), color));
         y += leaf.h + MM_LEAF_GAP;
       }
       if (block.folded) out.set("fold-" + items.find(item => item.group === block.group)!.id, { type: "text", x: leafX, y, wrap: MM_LEAF_W, text: foldNote(block.folded), size: "small", color: "ink", by: "agent" });
@@ -214,18 +226,22 @@ const MMC_CENTER_W = 190, MMC_TOPIC_W = 220, MMC_LEAF_W = 300, MMC_GAP_X = 44;
 function mindmapCompact(out: Map<string, BoardElement>, items: BoardItem[], summaries: GroupSummary[], center: string, chapters: Chapters, hidden: BoardItem[]): void {
   const topicX = LEFT + MMC_CENTER_W + MMC_GAP_X, leafX = topicX + MMC_TOPIC_W + MMC_GAP_X;
   const centerText = center || "会议主题";
-  out.set("mm-center", { type: "shape", kind: "pill", color: TINT.white, stroke: "ink", x: LEFT, y: TOP, w: MMC_CENTER_W, h: Math.max(64, leafHeight(centerText, MMC_CENTER_W)), text: centerText, size: "large", by: "agent" });
-  let cursor = TOP;
-  for (const block of branches(items, summaries, chapters, hidden, MMC_TOPIC_W, MMC_LEAF_W, COMPACT_ITEMS_PER_GROUP)) {
+  const centerH = Math.max(64, leafHeight(centerText, MMC_CENTER_W));
+  const blocks = branches(items, summaries, chapters, hidden, MMC_TOPIC_W, MMC_LEAF_W, COMPACT_ITEMS_PER_GROUP);
+  // The centre sits level with the first topic, so the first branch is a straight line.
+  const centerY = TOP + Math.max(0, ((blocks[0]?.topicH ?? centerH) - centerH) / 2);
+  out.set("mm-center", { type: "shape", kind: "pill", color: TINT.white, stroke: "ink", x: LEFT, y: centerY, w: MMC_CENTER_W, h: centerH, text: centerText, size: "large", by: "agent" });
+  let cursor = TOP + Math.max(0, (centerH - (blocks[0]?.topicH ?? centerH)) / 2);
+  for (const block of blocks) {
     const color = BRANCH[block.index % BRANCH.length];
     const topicId = topicNodeId(block.group);
     out.set(topicId, { type: "shape", kind: "rounded", color: block.state === "已小结" ? TINT.paper : TINT.white, stroke: color, x: topicX, y: cursor, w: MMC_TOPIC_W, h: block.topicH, text: block.topicText, size: "body", textAlign: "left", by: "agent" });
-    out.set("mm-a-" + key(block.group), { type: "arrow", from: "mm-center", to: topicId, fromSide: "right", toSide: "left", head: "none", color, by: "agent" });
+    out.set("mm-a-" + key(block.group), branchLine("mm-center", "right", [LEFT + MMC_CENTER_W, centerY + centerH / 2], topicId, color));
     let y = cursor;
     for (const leaf of block.leaves) {
       const style = STYLE[leaf.item.kind];
       out.set(elementId(leaf.item), { type: "shape", kind: "rounded", color: leaf.item.kind === "status" ? STATUS_TINT[leaf.item.group] ?? TINT.paper : style.color, ...(style.stroke ? { stroke: style.stroke } : {}), x: leafX, y, w: MMC_LEAF_W, h: leaf.h, text: leaf.text, size: "body", textAlign: "left", by: "agent" });
-      out.set("mm-e-" + leaf.item.id, { type: "arrow", from: topicId, to: elementId(leaf.item), fromSide: "right", toSide: "left", head: "none", color, by: "agent" });
+      out.set("mm-e-" + leaf.item.id, branchLine(topicId, "right", [topicX + MMC_TOPIC_W, cursor + block.topicH / 2], elementId(leaf.item), color));
       y += leaf.h + MM_LEAF_GAP;
     }
     if (block.folded) out.set("fold-" + items.find(item => item.group === block.group)!.id, { type: "text", x: leafX, y, wrap: MMC_LEAF_W, text: foldNote(block.folded), size: "small", color: "ink", by: "agent" });

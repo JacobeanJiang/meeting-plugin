@@ -2674,6 +2674,9 @@ function branches(items, summaries, chapters, hidden, topicW, leafW, cap) {
   });
 }
 var foldNote = (count) => "\u5DF2\u6536\u8D77 " + count + " \u6761\u7EC6\u8282\uFF0C\u95EE\u7B54\u548C\u5BFC\u51FA\u4E2D\u4ECD\u53EF\u67E5\u5230";
+function branchLine(parent, side2, at, child, color) {
+  return { type: "arrow", from: at.map(Math.round), anchor: { id: parent, side: side2 }, to: child, toSide: side2 === "right" ? "left" : "right", head: "none", color, by: "agent" };
+}
 function mindmap(out, items, summaries, center, chapters = NO_CHAPTERS, hidden = []) {
   const centerX = LEFT + MM_LEAF_W + MM_GAP_X + MM_TOPIC_W + MM_GAP_X;
   const blocks = branches(items, summaries, chapters, hidden, MM_TOPIC_W, MM_LEAF_W, MINDMAP_LEAVES);
@@ -2684,22 +2687,25 @@ function mindmap(out, items, summaries, center, chapters = NO_CHAPTERS, hidden =
   const height = Math.max(84, sideH(true), sideH(false));
   const centerText = center || "\u4F1A\u8BAE\u4E3B\u9898";
   const centerH = Math.max(84, leafHeight(centerText, MM_CENTER_W));
-  out.set("mm-center", { type: "shape", kind: "pill", color: TINT.white, stroke: "ink", x: centerX, y: TOP + (height - centerH) / 2, w: MM_CENTER_W, h: centerH, text: centerText, size: "large", by: "agent" });
+  const centerY = TOP + (height - centerH) / 2;
+  out.set("mm-center", { type: "shape", kind: "pill", color: TINT.white, stroke: "ink", x: centerX, y: centerY, w: MM_CENTER_W, h: centerH, text: centerText, size: "large", by: "agent" });
   for (const right of [true, false]) {
     let cursor = TOP + (height - sideH(right)) / 2;
     const topicX = right ? centerX + MM_CENTER_W + MM_GAP_X : centerX - MM_GAP_X - MM_TOPIC_W;
     const leafX = right ? topicX + MM_TOPIC_W + MM_GAP_X : topicX - MM_GAP_X - MM_LEAF_W;
-    const inner = right ? "right" : "left", outer = right ? "left" : "right";
+    const side2 = right ? "right" : "left";
+    const centerEdge = right ? centerX + MM_CENTER_W : centerX, topicEdge = right ? topicX + MM_TOPIC_W : topicX;
     for (const block of blocks.filter((entry) => entry.right === right)) {
       const color = BRANCH[block.index % BRANCH.length];
       const topicId = topicNodeId(block.group);
-      out.set(topicId, { type: "shape", kind: "rounded", color: block.state === "\u5DF2\u5C0F\u7ED3" ? TINT.paper : TINT.white, stroke: color, x: topicX, y: cursor + (block.blockH - block.topicH) / 2, w: MM_TOPIC_W, h: block.topicH, text: block.topicText, size: "body", textAlign: "left", by: "agent" });
-      out.set("mm-a-" + key(block.group), { type: "arrow", from: "mm-center", to: topicId, fromSide: inner, toSide: outer, head: "none", color, by: "agent" });
+      const topicY = cursor + (block.blockH - block.topicH) / 2;
+      out.set(topicId, { type: "shape", kind: "rounded", color: block.state === "\u5DF2\u5C0F\u7ED3" ? TINT.paper : TINT.white, stroke: color, x: topicX, y: topicY, w: MM_TOPIC_W, h: block.topicH, text: block.topicText, size: "body", textAlign: "left", by: "agent" });
+      out.set("mm-a-" + key(block.group), branchLine("mm-center", side2, [centerEdge, centerY + centerH / 2], topicId, color));
       let y2 = cursor + (block.blockH - block.leavesH) / 2;
       for (const leaf of block.leaves) {
         const style = STYLE[leaf.item.kind];
         out.set(elementId(leaf.item), { type: "shape", kind: "rounded", color: leaf.item.kind === "status" ? STATUS_TINT[leaf.item.group] ?? TINT.paper : style.color, ...style.stroke ? { stroke: style.stroke } : {}, x: leafX, y: y2, w: MM_LEAF_W, h: leaf.h, text: leaf.text, size: "body", textAlign: "left", by: "agent" });
-        out.set("mm-e-" + leaf.item.id, { type: "arrow", from: topicId, to: elementId(leaf.item), fromSide: inner, toSide: outer, head: "none", color, by: "agent" });
+        out.set("mm-e-" + leaf.item.id, branchLine(topicId, side2, [topicEdge, topicY + block.topicH / 2], elementId(leaf.item), color));
         y2 += leaf.h + MM_LEAF_GAP;
       }
       if (block.folded) out.set("fold-" + items.find((item) => item.group === block.group).id, { type: "text", x: leafX, y: y2, wrap: MM_LEAF_W, text: foldNote(block.folded), size: "small", color: "ink", by: "agent" });
@@ -2714,18 +2720,21 @@ var MMC_GAP_X = 44;
 function mindmapCompact(out, items, summaries, center, chapters, hidden) {
   const topicX = LEFT + MMC_CENTER_W + MMC_GAP_X, leafX = topicX + MMC_TOPIC_W + MMC_GAP_X;
   const centerText = center || "\u4F1A\u8BAE\u4E3B\u9898";
-  out.set("mm-center", { type: "shape", kind: "pill", color: TINT.white, stroke: "ink", x: LEFT, y: TOP, w: MMC_CENTER_W, h: Math.max(64, leafHeight(centerText, MMC_CENTER_W)), text: centerText, size: "large", by: "agent" });
-  let cursor = TOP;
-  for (const block of branches(items, summaries, chapters, hidden, MMC_TOPIC_W, MMC_LEAF_W, COMPACT_ITEMS_PER_GROUP)) {
+  const centerH = Math.max(64, leafHeight(centerText, MMC_CENTER_W));
+  const blocks = branches(items, summaries, chapters, hidden, MMC_TOPIC_W, MMC_LEAF_W, COMPACT_ITEMS_PER_GROUP);
+  const centerY = TOP + Math.max(0, ((blocks[0]?.topicH ?? centerH) - centerH) / 2);
+  out.set("mm-center", { type: "shape", kind: "pill", color: TINT.white, stroke: "ink", x: LEFT, y: centerY, w: MMC_CENTER_W, h: centerH, text: centerText, size: "large", by: "agent" });
+  let cursor = TOP + Math.max(0, (centerH - (blocks[0]?.topicH ?? centerH)) / 2);
+  for (const block of blocks) {
     const color = BRANCH[block.index % BRANCH.length];
     const topicId = topicNodeId(block.group);
     out.set(topicId, { type: "shape", kind: "rounded", color: block.state === "\u5DF2\u5C0F\u7ED3" ? TINT.paper : TINT.white, stroke: color, x: topicX, y: cursor, w: MMC_TOPIC_W, h: block.topicH, text: block.topicText, size: "body", textAlign: "left", by: "agent" });
-    out.set("mm-a-" + key(block.group), { type: "arrow", from: "mm-center", to: topicId, fromSide: "right", toSide: "left", head: "none", color, by: "agent" });
+    out.set("mm-a-" + key(block.group), branchLine("mm-center", "right", [LEFT + MMC_CENTER_W, centerY + centerH / 2], topicId, color));
     let y2 = cursor;
     for (const leaf of block.leaves) {
       const style = STYLE[leaf.item.kind];
       out.set(elementId(leaf.item), { type: "shape", kind: "rounded", color: leaf.item.kind === "status" ? STATUS_TINT[leaf.item.group] ?? TINT.paper : style.color, ...style.stroke ? { stroke: style.stroke } : {}, x: leafX, y: y2, w: MMC_LEAF_W, h: leaf.h, text: leaf.text, size: "body", textAlign: "left", by: "agent" });
-      out.set("mm-e-" + leaf.item.id, { type: "arrow", from: topicId, to: elementId(leaf.item), fromSide: "right", toSide: "left", head: "none", color, by: "agent" });
+      out.set("mm-e-" + leaf.item.id, branchLine(topicId, "right", [topicX + MMC_TOPIC_W, cursor + block.topicH / 2], elementId(leaf.item), color));
       y2 += leaf.h + MM_LEAF_GAP;
     }
     if (block.folded) out.set("fold-" + items.find((item) => item.group === block.group).id, { type: "text", x: leafX, y: y2, wrap: MMC_LEAF_W, text: foldNote(block.folded), size: "small", color: "ink", by: "agent" });
@@ -2938,6 +2947,19 @@ var MeetingBoards = class {
     const structural = (doc) => doc.data.by === "agent" && (doc.data.type === "arrow" || doc.data.type === "container" || doc.id === "mm-center");
     const untouched = (doc) => written[doc.id] === doc.sha256 || structural(doc);
     const desired = layoutBoard(meeting, new Set(link.deleted), this.space());
+    for (const [id2, data2] of desired) {
+      const anchor = data2.anchor;
+      if (!anchor) continue;
+      delete data2.anchor;
+      if (link.deleted.includes(anchor.id)) {
+        desired.delete(id2);
+        continue;
+      }
+      const parent = docs.get(anchor.id);
+      if (!parent || untouched(parent)) continue;
+      const { x: x2, y: y2, w: w2, h: h2 } = parent.data;
+      data2.from = [Math.round(anchor.side === "right" ? x2 + w2 : x2), Math.round(y2 + h2 / 2)];
+    }
     const writes = [];
     const gone = (end) => typeof end === "string" && link.deleted.includes(end);
     for (const [id2, data2] of desired) if (data2.type === "arrow" && (gone(data2.from) || gone(data2.to))) desired.delete(id2);
@@ -3465,7 +3487,7 @@ function apiTranscriber(config, fetchFn = fetch) {
 }
 
 // src/mcp/server.ts
-var VERSION = "1.6.0";
+var VERSION = "1.6.1";
 console.log = console.info = (...args) => console.error(...args);
 var env = process.env;
 var home = path6.resolve(env.MEETING_ASSISTANT_HOME || path6.join(os4.homedir(), ".meeting-assistant"));
