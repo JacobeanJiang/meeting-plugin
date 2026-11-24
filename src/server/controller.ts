@@ -11,6 +11,7 @@ import * as OpenCC from "opencc-js";
 import { ModelStore, WINDOWS_DEFAULTS, type SetupState } from "./models";
 import { DEFAULT_ASSISTANT, detectTasks, mentionsAssistant, quickTasks, taskMessage, type Assistant } from "./tasks";
 import { generateMinutes } from "./minutes";
+import { planTodo, prepareTodos, rewritePrep, todosFromMinutes } from "./prep";
 import { minutesDocument, minutesMeta } from "../minutes-format";
 import { applyRound, itemsFromNotes, meaningfulLength, mergePlan, notesFromItems, summarize, type Generate } from "./summary";
 
@@ -205,6 +206,8 @@ export class MeetingController {
         record.lastChange ??= null;
         record.summaries ??= [];
         record.minutes ??= null; if (record.minutes?.state === "working") record.minutes = { ...record.minutes, state: "failed", error: "会议助手重启时纪要还没生成完，请重新生成" };
+        record.preps ??= null; if (record.preps?.state === "working") record.preps = { ...record.preps, state: "failed", error: "会议助手重启时还没准备完，请重新准备" };
+        record.todoDone ??= []; for (const task of record.aiTasks ?? []) if (task.status === "planning") Object.assign(task, { status: "failed", error: "会议助手重启时计划还没写完，请重新交给" + this.assistant.name + "处理", finishedAt: Date.now() });
         record.chapters ??= null; record.nextMeetingId ??= null; record.aiTasks ??= []; record.aiSessionId ??= null; record.workspaceId ??= null; record.chatSessionId ??= null;
         for (const task of record.aiTasks) if (task.status === "running" || task.status === "queued") Object.assign(task, { status: "failed", error: "服务重启时任务还没完成，可以在会上重新请" + this.assistant.name + "做一次", finishedAt: task.finishedAt ?? Date.now() });
         for (const item of record.items) item.sub ??= null;
@@ -257,7 +260,7 @@ export class MeetingController {
       defaultForm: (r.defaultForm === "auto" ? "mindmap" : pick(r.defaultForm, ["topics", "mindmap", "flow", "matrix", "status"] as const, "mindmap")), aiTasks: r.aiTasks !== false,
       rewrite: r.rewrite !== false, rewriteModel: typeof r.rewriteModel === "string" && r.rewriteModel.trim() ? r.rewriteModel.trim().slice(0, 256) : null,
       asrEngine: r.asrEngine === "local" ? "local" : "cloud",
-      scenarios: normalizeScenarios(r.scenarios) };
+      scenarios: normalizeScenarios(r.scenarios), prepTodos: r.prepTodos !== false };
   }
 
   private publicMeeting(record: Stored): Meeting { const { audioFiles: _files, sessionDir: _dir, asrModel: _model, ...value } = record; return value; }
@@ -371,7 +374,7 @@ export class MeetingController {
       const model = await this.models.preferred(this.settings.asrModel);
       this.configFor = ""; // written once the model is on disk, see drain()
       if (this.models.state.status === "failed") this.prepare();
-      this.current = { id, title: title.trim().slice(0, 200) || "会议 " + new Date().toLocaleString(), startedAt: Date.now(), endedAt: null, phase: "starting", segments: [], notes: [], summaryThrough: -1, summaryAt: null, summaryState: "idle", summaryError: null, error: null, plan: null, items: [], links: [], summaries: [], lastChange: null, requestedForm: null, chapters: null, nextMeetingId: null, aiTasks: [], aiSessionId: null, chatSessionId: origin?.chatSessionId ?? null, minutes: null, redraw: null, workspaceId: origin?.workspaceId ?? null, audioFiles: {}, sessionDir, asrModel: model };
+      this.current = { id, title: title.trim().slice(0, 200) || "会议 " + new Date().toLocaleString(), startedAt: Date.now(), endedAt: null, phase: "starting", segments: [], notes: [], summaryThrough: -1, summaryAt: null, summaryState: "idle", summaryError: null, error: null, plan: null, items: [], links: [], summaries: [], lastChange: null, requestedForm: null, chapters: null, nextMeetingId: null, aiTasks: [], aiSessionId: null, chatSessionId: origin?.chatSessionId ?? null, minutes: null, preps: null, redraw: null, workspaceId: origin?.workspaceId ?? null, audioFiles: {}, sessionDir, asrModel: model };
       this.records.set(id, this.current); this.level = null; this.recorderReady = false;
       await this.persist(); this.emit();
       this.startTimeout = setTimeout(() => {
@@ -605,12 +608,120 @@ export class MeetingController {
         if (this.disposed) return;
         record.minutes = { markdown: result.markdown, at: Date.now(), through, model: result.model, state: "idle", error: null };
         this.deps.log("minutes_completed", { count: result.parts, success: true });
+        if (this.settings.prepTodos) try { this.requestPreps(id); } catch { /* no action items */ }
       } catch (error) {
         if (this.disposed) return;
         record.minutes = { ...record.minutes!, state: "failed", error: error instanceof Error ? error.message.slice(0, 300) : "纪要生成失败，请重试" };
         this.deps.log("minutes_failed", { success: false });
       } finally {
         this.minutesRunning.delete(id);
+        if (!this.disposed) { await this.persist(record).catch(() => undefined); this.emit(); }
+      }
+    })();
+    return this.snapshot(record);
+  }
+  /** A record and one of its minutes' action items, as written there. */
+  private todoOf(meetingId: string, todo: string): Stored {
+    const record = this.records.get(meetingId);
+    if (!record) throw Error("未找到会议");
+    if (!todosFromMinutes(record.minutes?.markdown).includes(todo)) throw Error("会议纪要里没有这条待办，纪要可能已经重新生成");
+    return record;
+  }
+  /** The plan for one task, written in the background; the task then waits for the person at "confirm". */
+  private writePlan(record: Stored, task: AiTask, revise: { plan: string; feedback: string } | null): void {
+    void (async () => {
+      try {
+        const plan = await planTodo(task.todo!, record.minutes?.markdown ?? "", record, this.deps.generate, this.settings.model, this.assistant.name, revise, Math.min(25000, this.deps.organiseTimeoutMs ?? 25000));
+        if (this.disposed || task.status !== "planning") return;
+        Object.assign(task, { status: "confirm", plan, error: null });
+        this.deps.log("todo_planned", { success: true });
+      } catch (error) {
+        if (this.disposed || task.status !== "planning") return;
+        Object.assign(task, revise ? { status: "confirm", error: error instanceof Error ? error.message : "没能修改计划" } : { status: "failed", error: error instanceof Error ? error.message : "没能生成处理计划", finishedAt: Date.now() });
+        this.deps.log("todo_plan_failed", { success: false });
+      }
+      if (!this.disposed) { await this.persist(record).catch(() => undefined); this.emit(); }
+    })();
+  }
+  /** Hands an action item to the assistant: first a plan to confirm (decideTask carries it out), see writePlan. */
+  async handTodo(meetingId: string, todo: string): Promise<Snapshot> {
+    const record = this.todoOf(meetingId, todo);
+    if (!this.deps.sessions) throw Error("当前环境不支持在后台处理待办");
+    if (record.aiTasks?.some(task => task.todo === todo && ["planning", "confirm", "queued", "running"].includes(task.status))) throw Error("这条待办已经在处理了");
+    record.aiTasks ??= [];
+    const task: AiTask = { id: "t" + (record.aiTasks.length + 1), instruction: "处理会后待办：" + todo, quote: "", refs: [], status: "planning", createdAt: Date.now(), startedAt: null, finishedAt: null, result: null, error: null, turnId: null, scenario: null, todo, plan: null, previous: null };
+    record.aiTasks.push(task); record.todoDone = (record.todoDone ?? []).filter(item => item !== todo);
+    await this.persist(record); this.emit();
+    this.writePlan(record, task, null);
+    return this.snapshot(record);
+  }
+  /** 修改计划: the plan rewritten with the person's remarks; the task waits for them again. */
+  async replanTodo(meetingId: string, taskId: string, feedback: string): Promise<Snapshot> {
+    const record = this.records.get(meetingId); const task = record?.aiTasks?.find(entry => entry.id === taskId);
+    if (!record || !task?.todo) throw Error("未找到这条待办的处理计划");
+    if (task.status !== "confirm") throw Error("这个计划已经处理过了");
+    const text = feedback.trim().slice(0, 500);
+    if (!text) throw Error("请写下要怎么改");
+    Object.assign(task, { status: "planning", error: null });
+    await this.persist(record); this.emit();
+    this.writePlan(record, task, { plan: task.plan ?? "", feedback: text });
+    return this.snapshot(record);
+  }
+  /** 继续补充要求: a new task for the same item, carrying the earlier result; runs at once since the person wrote what to do. */
+  async followTodo(meetingId: string, taskId: string, request: string): Promise<Snapshot> {
+    const record = this.records.get(meetingId); const done = record?.aiTasks?.find(entry => entry.id === taskId);
+    if (!record || !done?.todo) throw Error("未找到这条待办的处理结果");
+    const text = request.trim().slice(0, 500);
+    if (!text) throw Error("请写下要补充的要求");
+    if (!this.deps.sessions) throw Error("当前环境不支持在后台处理待办");
+    if (record.aiTasks!.some(task => task.todo === done.todo && ["planning", "confirm", "queued", "running"].includes(task.status))) throw Error("这条待办已经在处理了");
+    record.aiTasks!.push({ id: "t" + (record.aiTasks!.length + 1), instruction: text, quote: "", refs: [], status: "queued", createdAt: Date.now(), startedAt: null, finishedAt: null, result: null, error: null, turnId: null, scenario: null, todo: done.todo, plan: null, previous: done.result });
+    await this.persist(record); this.emit();
+    this.runTasks();
+    return this.snapshot(record);
+  }
+  /** The person marks an action item done (or not done again). */
+  async markTodo(meetingId: string, todo: string, done: boolean): Promise<Snapshot> {
+    const record = this.todoOf(meetingId, todo);
+    record.todoDone = (record.todoDone ?? []).filter(item => item !== todo).concat(done ? [todo] : []);
+    await this.persist(record); this.emit();
+    return this.snapshot(record);
+  }
+  /** 让AI 助手改写: the prepared message rewritten as asked, replacing the earlier one. */
+  async rewriteTodoPrep(meetingId: string, todo: string, request: string): Promise<Snapshot> {
+    const record = this.records.get(meetingId); const prep = record?.preps?.items.find(item => item.todo === todo);
+    if (!record || !prep) throw Error("未找到这条待办准备的消息");
+    const text = request.trim().slice(0, 500);
+    if (!text) throw Error("请写下要怎么改");
+    prep.body = await rewritePrep(prep, text, this.deps.generate, this.settings.model, Math.min(25000, this.deps.organiseTimeoutMs ?? 25000));
+    await this.persist(record); this.emit();
+    return this.snapshot(record);
+  }
+  private prepsRunning = new Set<string>();
+  /** Prepares what the minutes' action items need (see prep.ts) in the background, from the current minutes. */
+  requestPreps(id: string): Snapshot {
+    const record = this.records.get(id);
+    if (!record) throw Error("未找到会议");
+    const minutes = record.minutes;
+    if (!minutes?.markdown) throw Error("这场会议还没有会议纪要，请先生成");
+    if (!todosFromMinutes(minutes.markdown).length) throw Error("会议纪要里没有待办事项");
+    if (this.prepsRunning.has(id)) return this.snapshot(record);
+    this.prepsRunning.add(id);
+    const previous = record.preps;
+    record.preps = { state: "working", at: previous?.at ?? null, forMinutes: previous?.forMinutes ?? null, items: previous?.items ?? [], skipped: previous?.skipped ?? 0, error: null, model: previous?.model ?? null };
+    void this.persist(record).catch(() => undefined); this.emit();
+    void (async () => {
+      try {
+        const result = await prepareTodos(minutes.markdown!, record, this.deps.generate, this.settings.model, Math.min(25000, this.deps.organiseTimeoutMs ?? 25000));
+        if (this.disposed) return;
+        record.preps = { state: "idle", at: Date.now(), forMinutes: minutes.at, items: result.items, skipped: result.skipped, error: null, model: result.model };
+        this.deps.log("todo_preps_completed", { count: result.items.length, success: true });
+      } catch (error) {
+        if (this.disposed) return;
+        record.preps = { ...record.preps!, state: "failed", error: error instanceof Error ? error.message.slice(0, 300) : "准备待办失败，请重试" };
+        this.deps.log("todo_preps_failed", { success: false });
+      } finally {
+        this.prepsRunning.delete(id);
         if (!this.disposed) { await this.persist(record).catch(() => undefined); this.emit(); }
       }
     })();

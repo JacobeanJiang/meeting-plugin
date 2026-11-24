@@ -14,6 +14,8 @@ export type Settings = {
   asrEngine: "cloud" | "local";
   /** Situations the person describes in their own words; when the meeting gets there, the assistant does the work they set, without being named. */
   scenarios: Scenario[];
+  /** After the minutes are written, prepare what the action items need (for now: a message to send for each item about talking to someone). */
+  prepTodos: boolean;
 };
 /** "when" the discussion matches, "action" what to do; confirm: wait for the person on the meeting page before carrying it out. */
 export type Scenario = { id: string; when: string; action: string; confirm: boolean; enabled: boolean };
@@ -25,7 +27,7 @@ export const SCENARIO_EXAMPLES: { when: string; action: string }[] = [
   { when: "有人问到具体数据，但会上没人能马上回答", action: "查询相关数据，给出结论和数据来源" },
   { when: "会上定下了待办和负责人", action: "整理成待办清单：事项、负责人、截止时间" },
 ];
-export const DEFAULT_SETTINGS: Settings = { binaryPath: "", model: null, autoSummary: true, chunkSecs: 15, asrModel: null, language: "zh", script: "simplified", vocabulary: "", vad: "standard", cleanup: true, defaultForm: "mindmap", aiTasks: true, rewrite: true, rewriteModel: null, asrEngine: "cloud", scenarios: [] };
+export const DEFAULT_SETTINGS: Settings = { binaryPath: "", model: null, autoSummary: true, chunkSecs: 15, asrModel: null, language: "zh", script: "simplified", vocabulary: "", vad: "standard", cleanup: true, defaultForm: "mindmap", aiTasks: true, rewrite: true, rewriteModel: null, asrEngine: "cloud", scenarios: [], prepTodos: true };
 export type Segment = {
   id: string; seq: number; startMs: number; endMs: number;
   status: "pending" | "transcribing" | "done" | "empty" | "failed";
@@ -95,16 +97,32 @@ export type Meeting = {
   workspaceId?: string | null;
   /** Whole-meeting minutes written with the product minutes prompt (Markdown), and how far the transcript was covered. */
   minutes?: Minutes | null;
+  /** What was prepared for the minutes' action items after they were written. */
+  preps?: Preps | null;
+  /** Action items (as written in the minutes) the person marked as done. */
+  todoDone?: string[];
   /** Progress of redrawing the whole board in a requested form, replayed window by window. */
   redraw?: { done: number; total: number } | null;
 };
 export type Minutes = { markdown: string | null; at: number | null; through: number; state: "idle" | "working" | "failed"; error: string | null; model: string | null };
+/**
+ * What was prepared for the minutes' action items. kind says what an entry is; "message" (a message to send to the person or
+ * team the item is about) is the first kind, others (a first draft, a lookup) can be added beside it. forMinutes is the
+ * minutes version (its time) the entries were made from; skipped counts the items nothing was prepared for.
+ */
+export type PrepKind = "message";
+export type TodoPrep = { todo: string; kind: PrepKind; to: string | null; title: string; body: string };
+export type Preps = { state: "idle" | "working" | "failed"; at: number | null; forMinutes: number | null; items: TodoPrep[]; skipped: number; error: string | null; model: string | null };
 /** One request to AI 助手 heard in the meeting: queued, carried out in the background conversation, then its result or failure. */
 /**
  * confirm: proposed by a scenario that waits for the person; skipped: the person declined it.
  * scenario: the situation ("when") that raised it, as set at the time; absent for requests naming the assistant.
  */
-export type AiTask = { id: string; instruction: string; quote: string; refs: string[]; status: "confirm" | "queued" | "running" | "done" | "failed" | "skipped"; createdAt: number; startedAt: number | null; finishedAt: number | null; result: string | null; error: string | null; turnId: string | null; scenario?: string | null };
+/**
+ * Work for the background conversation. Tasks from the minutes' action items carry the item (todo): they start "planning",
+ * wait at "confirm" with the plan until the person starts them, and a follow-up request carries the earlier result (previous).
+ */
+export type AiTask = { id: string; instruction: string; quote: string; refs: string[]; status: "planning" | "confirm" | "queued" | "running" | "done" | "failed" | "skipped"; createdAt: number; startedAt: number | null; finishedAt: number | null; result: string | null; error: string | null; turnId: string | null; scenario?: string | null; todo?: string | null; plan?: string | null; previous?: string | null };
 /** Recognition model preparation, done automatically after install: checking, downloading with progress, ready, or failed with a reason. */
 export type Setup = { status: "checking" | "downloading" | "ready" | "failed"; model: string; received: number; total: number; error: string | null };
 export type Snapshot = { settings: Settings; meeting: Meeting | null; levelDbfs: number | null; pending: number; history: { id: string; title: string; startedAt: number; phase: string; theme: string }[]; setup: Setup };

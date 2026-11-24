@@ -63,6 +63,7 @@ body.panel-open #toggle{background:#e6e3dc;color:var(--ink)}
 .picker{position:relative}
 .menu{position:absolute;right:0;top:42px;z-index:20;width:268px;padding:6px;border-radius:14px;background:var(--surface);box-shadow:0 22px 50px -18px rgba(23,22,26,.4),0 0 0 1px var(--line);transform-origin:top right;animation:pop .18s var(--ease) both}
 .menu[hidden]{display:none}
+#menu{max-height:calc(100dvh - 60px);overflow-y:auto}
 .tabs{display:flex;gap:2px;align-self:stretch}
 .tab{position:relative;height:42px;padding:0 9px;white-space:nowrap;flex:none;font-size:12.5px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:5px}
 body.no-ai .ai-setting,body.no-ai .pop{display:none!important}
@@ -100,6 +101,23 @@ body.tab-minutes .minutes{display:block}
 .md pre{background:var(--paper);padding:8px;border-radius:8px;overflow:auto}.md pre code{background:none;padding:0}
 .md table{border-collapse:collapse;font-size:12px;margin:6px 0;display:block;overflow:auto}.md th,.md td{border:1px solid var(--line);padding:4px 6px;text-align:left}
 .md a{color:#3b4bbf}
+.todos{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)}
+.todos-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.todos-head b{font-size:13.5px}.todos-head span{flex:1;min-width:0;font-size:12px;color:var(--muted)}
+.todos button{height:26px;padding:0 9px;border-radius:7px;font-size:12px;box-shadow:inset 0 0 0 1px var(--line-2);background:var(--surface);white-space:nowrap}
+.todos button.pri{background:var(--ink);color:#fff;box-shadow:none}.todos button:disabled{opacity:.55}
+.todo-filters{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 2px}.todo-filters button{height:24px;border-radius:999px}.todo-filters button.on{background:var(--ink);color:#fff;box-shadow:none}
+.todo-row{border-radius:10px;box-shadow:inset 0 0 0 1px var(--line);padding:10px 12px;margin:8px 0;background:var(--surface)}.todo-row.marked{background:var(--paper);box-shadow:none}
+.todo-line{display:flex;gap:8px;align-items:flex-start}.todo-line .t{flex:1;min-width:0;font-size:13px;color:var(--ink);overflow-wrap:anywhere}.todo-row.marked .t{color:var(--muted);text-decoration:line-through}
+.todo-st{flex:none;font-size:11.5px;border-radius:999px;padding:1px 8px;margin-top:1px;background:var(--paper);color:var(--muted);white-space:nowrap}
+.todo-st.ok{background:#e6f2ea;color:#2f6b4f}.todo-st.run{background:#fff1dc;color:#9a5b12}.todo-st.wait{background:#ebe5fa;color:#5b4a8a}.todo-st.gray{background:#e9e6df}
+.todo-box{margin-top:8px;padding:8px 10px;border-radius:8px;background:var(--paper)}.todo-box.dim{opacity:.6}
+.todo-box-head{display:flex;gap:8px;flex-wrap:wrap;align-items:baseline;font-size:11.5px;color:var(--muted)}.todo-box-head b{color:var(--ink-2);font-weight:600}
+.todo-body{margin-top:4px;font-size:13px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}.todo-box .md{margin-top:4px;padding-top:0;border-top:0}
+.todo-box .clip{max-height:9.6em;overflow:hidden;-webkit-mask-image:linear-gradient(#000 65%,transparent);mask-image:linear-gradient(#000 65%,transparent)}
+.todo-acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.todo-hint{margin-top:6px;font-size:12px;color:var(--muted)}.todo-hint a{color:#3b4bbf;cursor:pointer}.todo-hint.err{color:#b8402a}
+.todo-edit{margin-top:8px}.todo-edit textarea{width:100%;box-sizing:border-box;min-height:56px;resize:vertical;border-radius:8px;border:0;box-shadow:inset 0 0 0 1px var(--line-2);padding:6px 8px;font:13px/1.6 inherit;background:var(--surface);color:var(--ink)}
+.todos .note{font-size:12px;color:var(--muted);margin:4px 0}
 .ai-empty{padding:28px 6px;color:var(--muted);font-size:13px;line-height:1.7}.ai-empty b{display:block;color:var(--ink);font-size:14px;margin-bottom:4px}
 .ai-empty button{margin-top:10px;height:30px;padding:0 12px;border-radius:8px;background:var(--ink);color:#fff;font-size:12.5px}
 .pop{position:absolute;right:16px;bottom:16px;z-index:15;width:min(380px,calc(100% - 32px));max-height:60%;overflow:auto;padding:14px 16px;border-radius:16px;background:var(--surface);box-shadow:0 24px 60px -20px rgba(23,22,26,.45),0 0 0 1px var(--line);animation:pop .22s var(--ease) both}
@@ -129,6 +147,38 @@ main{flex:1;min-height:0;display:flex;gap:12px;padding:4px 12px 12px}
 .stage{position:relative;flex:1;min-width:0;border-radius:var(--radius);overflow:hidden;background:var(--surface);
   box-shadow:0 0 0 1px var(--line),0 30px 60px -40px rgba(23,22,26,.35);animation:rise .6s .05s var(--ease) both}
 iframe{display:block;border:0;width:100%;height:100%}
+.stage{container-type:inline-size}
+.live-map[hidden]{display:none}
+.stage.is-map > iframe{visibility:hidden}
+.live-map{position:absolute;inset:0;overflow:auto;background:radial-gradient(var(--line) 1px,transparent 1px) 0 0/16px 16px,var(--surface);padding:20px clamp(12px,3cqw,30px) 32px}
+.live-map h2{max-width:960px;margin:0 auto 22px;font-size:clamp(16px,2.2cqw,22px);line-height:1.4;overflow-wrap:anywhere}
+.live-map-empty{margin:24px auto;color:var(--muted);text-align:center}
+.live-map-branches{max-width:960px;margin:auto;border-inline-start:1px solid var(--line-2);padding-inline-start:16px}
+.live-map-branch{--map-ink:#365686;--map-fill:#eef3fa;display:grid;gap:8px;position:relative;margin-bottom:16px;min-width:0}
+.live-map-branch:nth-child(3n+2){--map-ink:#276454;--map-fill:#eaf5ef}
+.live-map-branch:nth-child(3n){--map-ink:#79583c;--map-fill:#f9f1e7}
+.live-map-branch h3{align-self:center;position:relative;margin:0;font-size:14px;color:var(--map-ink);overflow-wrap:anywhere}
+.live-map-branch h3::before{content:"";position:absolute;inset-inline-start:-20px;top:calc(50% - 3px);width:7px;height:7px;border-radius:50%;background:var(--map-ink)}
+.live-map-branch ul{display:grid;gap:6px;list-style:none;margin:0;min-width:0;border-inline-start:1px solid var(--map-ink);padding-inline-start:8px}
+.live-map-card{display:flex;align-items:baseline;gap:6px 10px;flex-wrap:wrap;padding:8px 10px;border-radius:8px;background:var(--map-fill);color:#292d34;font-size:13px;line-height:1.55;overflow-wrap:anywhere}
+.live-map-card{position:relative}
+.live-map-card::before,.live-map-branch h3::after{content:"";position:absolute;top:50%;inset-inline-end:100%;width:8px;border-top:1px solid var(--map-ink)}
+.live-map-branch h3::after{display:none}
+.live-map-card b{color:var(--map-ink);font-size:12px}
+.live-map-card span{flex:1;min-width:min(100%,120px);white-space:pre-line}
+.live-map-card button,.live-map-more{color:var(--map-ink);text-decoration:underline;text-underline-offset:3px;font-size:12px;padding:4px}
+.live-map-more{justify-self:start}
+@container (min-width:700px){
+  .live-map-branches{border:0;padding:0;background:linear-gradient(var(--line-2),var(--line-2)) center/1px 100% no-repeat}
+  .live-map-branch{grid-template-columns:minmax(0,1fr) 126px minmax(0,1fr);align-items:center;gap:18px;margin-bottom:20px}
+  .live-map-branch h3{grid-column:2;grid-row:1;text-align:center;background:var(--surface);border:1px solid var(--line-2);padding:7px;border-radius:8px}
+  .live-map-branch h3::before{display:none}
+  .live-map-branch h3::after{display:block;inset-inline-start:100%;width:18px}
+  .live-map-branch:nth-child(even) h3::after,.live-map-branch:nth-child(even) .live-map-card::before{inset-inline-start:auto;inset-inline-end:100%}
+  .live-map-branch:nth-child(even) .live-map-card::before{inset-inline-start:100%;inset-inline-end:auto}
+  .live-map-branch ul{grid-column:3;grid-row:1;border-inline-start:1px solid var(--map-ink);padding-inline-start:8px}
+  .live-map-branch:nth-child(even) ul{grid-column:1;border-inline-start:0;border-inline-end:1px solid var(--map-ink);padding-inline:0 8px}
+}
 .listening{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;pointer-events:none;padding:24px;width:min(360px,90%)}
 .listening[hidden]{display:none}
 .orb{position:relative;width:68px;height:68px;border-radius:50%;background:var(--ink);display:grid;place-items:center}
@@ -185,6 +235,8 @@ body:not(.panel-open) .panel{display:none}
 .line.cited{background:linear-gradient(90deg,rgba(255,77,46,.08),rgba(255,77,46,0) 85%);border-radius:10px;margin:0 -10px;padding-left:64px;padding-right:10px}
 .line.cited time{left:10px}.line.cited .no{left:10px;color:var(--rec)}
 .line.cited p{color:var(--ink)}
+.line.flash{animation:lineflash 2.6s ease-out}
+@keyframes lineflash{0%,35%{background:rgba(255,186,48,.30);border-radius:10px;box-shadow:0 0 0 6px rgba(255,186,48,.30)}100%{background:transparent;box-shadow:0 0 0 6px transparent}}
 .line.chatter p{color:#b8b3aa;font-size:13px}
 .line.chatter time::after{content:"闲聊";margin-left:6px;padding:0 5px;border-radius:4px;background:var(--paper);color:var(--muted);font-family:-apple-system,"PingFang SC",sans-serif;font-size:10px}
 .cite{display:flex;align-items:flex-start;gap:8px;margin:0 12px 6px;padding:10px 12px;border-radius:12px;background:var(--ink);color:#fff;font-size:12.5px;animation:pop .2s var(--ease) both}
@@ -254,6 +306,10 @@ body:not(.panel-open) .panel{display:none}
   .panel{left:6px;right:6px;width:auto}
 }
 @media (max-height:420px){.bar{padding-top:6px;padding-bottom:4px}}
+@media (max-width:460px){
+  .picker:has(> #menu){position:static}
+  #menu{top:44px;right:10px;width:min(268px,calc(100vw - 20px))}
+}
 </style>
 </head>
 <body class="panel-open">
@@ -300,6 +356,7 @@ body:not(.panel-open) .panel{display:none}
 <label>校对模型<select id="sRewritePick" hidden></select><input type="text" id="sRewriteModel" maxlength="256" placeholder="留空使用默认模型"><small id="sRewriteHint">填写模型名可换用其他模型；留空时使用当前平台的默认模型。</small></label>
 <h4>AI 整理</h4>
 <label class="check"><input type="checkbox" id="sAuto"><span>会议中自动整理<small>转写文字会发送给所配置的整理模型</small></span></label>
+<label class="check"><input type="checkbox" id="sPrep"><span>会后为待办准备沟通消息<small>纪要生成后，为需要找人沟通的待办写好消息，复制就能发</small></span></label>
 <label class="check ai-setting"><input type="checkbox" id="sAiTasks"><span>会中 AI 执行<small>会上说“AI 助手，帮我……”时，AI 助手 在后台直接执行，结果显示在“AI 执行”里</small></span></label>
 <div class="scenes ai-setting" id="scenes"><b>自定义场景</b><small>不用点名，会上讨论到这些情况时 AI 也会接手。新场景默认先在“AI 执行”里等你确认再执行。</small><div id="sceneList"></div><button type="button" class="add" id="sceneAdd">＋ 添加场景</button><div class="examples" id="sceneExamples"></div><small class="warn" id="sceneWarn" hidden>两项都填写的场景才会保存。</small></div>
 <h4>白板</h4>
@@ -309,6 +366,7 @@ body:not(.panel-open) .panel{display:none}
 <main>
   <section class="stage">
     <iframe title="Open Artifact 会议白板" id="board" referrerpolicy="no-referrer"></iframe>
+    <section class="live-map" id="liveMap" aria-label="实时导图" tabindex="0" hidden></section>
     <div class="listening" id="listening" hidden>
       <div class="orb" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M5 11v4M9 7v12M13 4v18M17 8v10M21 11v4"/></svg></div>
       <h2 id="listenTitle">正在聆听</h2>
@@ -331,13 +389,17 @@ body:not(.panel-open) .panel{display:none}
 const base=new URL('api',location.href);const $=id=>document.getElementById(id);
 const PHASE={starting:'正在打开麦克风',recording:'正在录音',paused:'录音已暂停',stopping:'正在完成转写',complete:'会议已结束',interrupted:'录音已中断'};
 const FORMS=[['mindmap','思维导图','主题 → 议题 → 观点（默认）','✳'],['topics','议题分区','评审、决策、多个议题','▦'],['flow','流程线','步骤、流程、排期','→'],['matrix','方案对比','多个方案取舍','⊞'],['status','进度看板','站会、周会、进度同步','☰']];
+const supportsLiveMap=document.body.hasAttribute('data-live-map');
+const LIVE_MAP_FORM=['live-map','实时导图','固定排版，随会议整理更新','⌘'];
+if(supportsLiveMap)FORMS[0][2]='可编辑白板，按议题和观点展开';
+const viewForms=supportsLiveMap ? [LIVE_MAP_FORM,...FORMS] : FORMS;
 const ICON={pause:'<svg width="12" height="12" viewBox="0 0 12 12"><rect x="2" y="1.5" width="2.6" height="9" rx="1" fill="currentColor"/><rect x="7.4" y="1.5" width="2.6" height="9" rx="1" fill="currentColor"/></svg>',play:'<svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 1.8v8.4c0 .5.5.8.9.5l6.4-4.2a.6.6 0 0 0 0-1L3.9 1.3c-.4-.3-.9 0-.9.5Z" fill="currentColor"/></svg>'};
 let latest=null,busy=false,loaded='',level=0,stick=true,toastKey='',dismissed='',cited=new Set(),citeFor='',seenChange=0,deltaTimer=0;const rendered=new Map();
 const time=ms=>{const n=Math.max(0,Math.floor(ms/1000));const h=Math.floor(n/3600),m=Math.floor(n%3600/60),s=n%60;return (h?h+':'+String(m).padStart(2,'0'):String(m).padStart(2,'0'))+':'+String(s).padStart(2,'0')};
 const wave=$('wave');for(let i=0;i<7;i++)wave.append(document.createElement('i'));
-for(const [form,name,hint,glyph] of FORMS){const b=document.createElement('button');b.setAttribute('role','menuitemradio');b.dataset.form=form;const g=document.createElement('span');g.className='glyph';g.textContent=glyph;const t=document.createElement('span');const n=document.createElement('b');n.textContent=name;const e=document.createElement('em');e.textContent=hint;t.append(n,e);b.append(g,t);b.onclick=()=>{closeMenu();post({action:'layout',form})};$('menu').append(b)}
+for(const [form,name,hint,glyph] of viewForms){const b=document.createElement('button');b.setAttribute('role','menuitemradio');b.dataset.form=form;const g=document.createElement('span');g.className='glyph';g.setAttribute('aria-hidden','true');g.textContent=glyph;const t=document.createElement('span');const n=document.createElement('b');n.textContent=name;const e=document.createElement('em');e.textContent=hint;t.append(n,e);b.append(g,t);b.onclick=()=>selectForm(form);$('menu').append(b)}
 {const again=document.createElement('button');again.dataset.refresh='1';const g=document.createElement('span');g.className='glyph';g.textContent='↻';const t=document.createElement('span');const n=document.createElement('b');n.textContent='按当前形式重新整理全场';const e=document.createElement('em');e.textContent='合并重复、补齐分组小结；完成前保留当前白板';t.append(n,e);again.append(g,t);again.onclick=()=>{closeMenu();const p=latest&&latest.meeting&&latest.meeting.plan;if(p)post({action:'layout',form:p.form,refresh:true})};$('menu').append(again)}
-{const note=document.createElement('div');note.className='note';note.textContent='新会议默认使用设置里的形式；在这里切换后不再自动更换。';$('menu').append(note)}
+{const note=document.createElement('div');note.className='note';note.textContent=supportsLiveMap?'打开会议默认显示实时导图。其他形式可在白板上编辑。':'新会议默认使用设置里的形式；在这里切换后不再自动更换。';$('menu').append(note)}
 function closeMenu(){$('menu').hidden=true;$('formBtn').setAttribute('aria-expanded','false')}
 $('formBtn').onclick=e=>{e.stopPropagation();const open=$('menu').hidden;$('menu').hidden=!open;$('formBtn').setAttribute('aria-expanded',String(open))};
 document.addEventListener('click',e=>{if(!$('menu').contains(e.target))closeMenu()});document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMenu()});
@@ -360,21 +422,23 @@ function render(data){
   const switching=m.requestedForm&&FORMS.find(f=>f[0]===m.requestedForm);const ai=$('ai');ai.classList.toggle('busy',m.summaryState==='working'||!!switching||(!plan&&live));
   $('ai').title=switching?'新形式整理好之前，白板保持当前内容':'';$('aiText').textContent=switching?'正在切换为「'+switching[1]+'」…':m.summaryState==='working'?'AI 正在整理':!plan?(live?'AI 正在聆听':'未生成白板'):'已整理到 '+time(through?through.endMs:0);
   const ch=m.lastChange;if(ch&&ch.at!==seenChange){if(seenChange){const parts=[];if(ch.rebuilt)parts.push('已按新形式重排');else{if(ch.added)parts.push('新增 '+ch.added);if(ch.revised)parts.push('更新 '+ch.revised);if(ch.linked)parts.push('关联 '+ch.linked)}if(parts.length){$('delta').textContent=parts.join(' · ');$('delta').hidden=false;clearTimeout(deltaTimer);deltaTimer=setTimeout(()=>$('delta').hidden=true,8000)}}seenChange=ch.at}
-  const current=plan?FORMS.find(f=>f[0]===plan.form):preferred;$('formLabel').textContent=current?current[1]:'白板形式';$('formBy').textContent=switching?'切换中':!plan?'默认':plan.lockedBy==='user'?'已指定':'AI 选择';
-  for(const b of $('menu').querySelectorAll('button[data-form]')){const on=plan&&b.dataset.form===plan.form;b.classList.toggle('on',!!on);b.setAttribute('aria-checked',String(!!on))}
-  $('formBtn').disabled=!live&&m.phase!=='complete'&&m.phase!=='interrupted';
+  renderFormMenu(m);
+  $('formBtn').disabled=!supportsLiveMap&&!live&&m.phase!=='complete'&&m.phase!=='interrupted';
   $('summary').disabled=busy||m.summaryState==='working'||!done.length;
-  const listening=$('listening');listening.hidden=!!hasBoard;listening.classList.toggle('idle',!live);
+  const listening=$('listening');listening.hidden=!!hasBoard||liveMapOpen;listening.classList.toggle('idle',!live);
   $('listenTitle').textContent=plan?(m.summaryState==='working'?'正在绘制白板':'还没有可上板的内容'):live?(m.phase==='paused'?'录音已暂停':'正在聆听'):'没有生成白板';
   $('listenText').textContent=plan?'已判断出会议主题，AI 正在提炼第一批要点。':live?(latest.settings&&latest.settings.autoSummary===false?'自动整理已关闭，字幕照常记录；可在右上角设置里打开，或点“立即整理”。':'先听一会儿，内容足够后开始画「'+preferred[1]+'」。'):'这场会议的有效发言较少，可以在右侧查看转写原文。';
-  const setup=latest.setup;if(setup&&setup.status!=='ready'&&!hasBoard){listening.hidden=false;$('listenTitle').textContent=setup.status==='failed'?'识别模型下载失败':'正在准备识别模型';$('listenText').textContent=setup.status==='failed'?(setup.error||'请检查网络')+'。录音已保存，可在会议助手页点“重新下载”，完成后自动转写。':setup.status==='downloading'&&setup.total?'首次使用需下载约 '+Math.round(setup.total/1048576)+'MB，已完成 '+Math.floor(setup.received/setup.total*100)+'%。录音照常进行，下载完成后自动补上转写。':'正在检查本机识别模型…'}
+  const setup=latest.setup;if(setup&&setup.status!=='ready'&&!hasBoard&&!liveMapOpen){listening.hidden=false;$('listenTitle').textContent=setup.status==='failed'?'识别模型下载失败':'正在准备识别模型';$('listenText').textContent=setup.status==='failed'?(setup.error||'请检查网络')+'。录音已保存，可在会议助手页点“重新下载”，完成后自动转写。':setup.status==='downloading'&&setup.total?'首次使用需下载约 '+Math.round(setup.total/1048576)+'MB，已完成 '+Math.floor(setup.received/setup.total*100)+'%。录音照常进行，下载完成后自动补上转写。':'正在检查本机识别模型…'}
   if(loaded!==data.boardUrl){$('board').src=data.boardUrl;loaded=data.boardUrl}
   else if(data.boardSpace&&boardSpace&&data.boardSpace!==boardSpace)setTimeout(fitBoard,1200); // redrawn for a different screen size: fit once the new layout is in
   if(data.boardSpace)boardSpace=data.boardSpace;
   renderFeed(m,latest.pending);renderTasks(m);renderMinutes(m);
+  if(liveMapOpen) renderLiveMap(m);
+  followTimeLink(data.focus);
   const failed=m.segments.filter(s=>s.status==='failed').length;$('retry').hidden=!failed;$('retry').textContent='重试 '+failed+' 段失败';$('retry').disabled=busy||live;
-  $('foot').textContent=done.length?done.length+' 段发言 · 白板可直接编辑，改动实时保存':'白板可直接编辑，改动实时保存';
-  toast(data.boardError||m.error||m.summaryError||'');
+  const footer = liveMapOpen ? '导图随会议整理更新' : '白板可直接编辑，改动实时保存';
+  $('foot').textContent=done.length ? done.length+' 段发言 · '+footer : footer;
+  toast((!liveMapOpen && data.boardError)||m.error||m.summaryError||'');
 }
 function renderFeed(m,pending){
   const feed=$('feed');const nearBottom=feed.scrollHeight-feed.scrollTop-feed.clientHeight<80;
@@ -435,7 +499,7 @@ function markdown(src){const lines=String(src||'').replace(/\r/g,'').split('\n')
     if((m=line.match(/^\s*\d+[.)、]\s*(.*)$/))){if(list!=='ol'){close();out.push('<ol>');list='ol'}out.push('<li>'+inline(m[1])+'</li>');continue}
     close();out.push('<p>'+inline(line)+'</p>')}
   if(code!==null)out.push('<pre><code>'+code.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</code></pre>');close();return out.join('')}
-const TASK_ST={confirm:'等你确认',queued:'排队中',running:'执行中',done:'已完成',failed:'没完成',skipped:'已忽略'};
+const TASK_ST={planning:'制定计划中',confirm:'等你确认',queued:'排队中',running:'执行中',done:'已完成',failed:'没完成',skipped:'已忽略'};
 let tab='feed',seenTasks=null,unread=new Set(),popTask='',popTimer=0;
 function setTab(name){tab=name;document.body.classList.toggle('tab-ai',name==='ai');document.body.classList.toggle('tab-minutes',name==='minutes');for(const b of document.querySelectorAll('.tab')){const on=b.dataset.tab===name;b.classList.toggle('on',on);b.setAttribute('aria-selected',String(on))}
   if(name==='ai'){unread.clear();paintCount()}if(!document.body.classList.contains('panel-open')){document.body.classList.add('panel-open');$('toggle').setAttribute('aria-pressed','true')}}
@@ -456,7 +520,7 @@ function renderTasks(m){const tasks=m.aiTasks||[];const box=$('ailist');
   else for(const t of tasks){const before=seenTasks.get(t.id);if(before!==t.status){if(!before||t.status==='done'||t.status==='failed'){if(t.status!=='skipped')showPop(t);if(tab!=='ai')unread.add(t.id)}seenTasks.set(t.id,t.status)}}
   paintCount();
   for(const el of box.querySelectorAll('[data-task-time]')){const t=tasks.find(x=>x.id===el.dataset.taskTime);if(t&&el.textContent!==taskTime(t))el.textContent=taskTime(t)}
-  const key=JSON.stringify([latest&&latest.settings&&latest.settings.aiTasks,tasks.map(t=>[t.id,t.status,t.result,t.error,t.instruction,t.quote,t.scenario,unread.has(t.id)])]);if(box.dataset.key===key)return;box.dataset.key=key;const before=shownTasks;shownTasks=new Set(tasks.map(t=>t.id));
+  const key=JSON.stringify([latest&&latest.settings&&latest.settings.aiTasks,tasks.map(t=>[t.id,t.status,t.result,t.error,t.instruction,t.quote,t.scenario,t.plan,unread.has(t.id)])]);if(box.dataset.key===key)return;box.dataset.key=key;const before=shownTasks;shownTasks=new Set(tasks.map(t=>t.id));
   box.replaceChildren();
   if(!tasks.length){const e=document.createElement('div');e.className='ai-empty';
     if(document.body.classList.contains('no-ai'))e.innerHTML='<b>会中 AI 执行暂不可用</b>没有在这台电脑上找到 Codex、Claude Code 或 Cursor 的命令行，所以会上点名AI 助手的请求不会被执行。安装其中任意一个后，重新打开会议页即可使用。';
@@ -465,10 +529,10 @@ function renderTasks(m){const tasks=m.aiTasks||[];const box=$('ailist');
     box.append(e);return}
   for(const t of [...tasks].sort((a,b)=>b.createdAt-a.createdAt)){const card=document.createElement('article');card.className='task';card.dataset.task=t.id;if(unread.has(t.id))card.classList.add('fresh');if(before.has(t.id))card.classList.add('still');
     const h=document.createElement('header');const st=document.createElement('span');st.className='st '+t.status;st.textContent=TASK_ST[t.status]||t.status;const tm=document.createElement('span');tm.dataset.taskTime=t.id;tm.textContent=taskTime(t);h.append(st,tm);
-    const h4=document.createElement('h4');h4.textContent=t.instruction;if(t.scenario){const sc=document.createElement('div');sc.className='scene';sc.textContent='场景：'+t.scenario;card.append(sc)}
+    const h4=document.createElement('h4');h4.textContent=t.instruction;if(t.scenario||t.todo){const sc=document.createElement('div');sc.className='scene';sc.textContent=t.scenario?'场景：'+t.scenario:'来自会后待办，在“纪要”里处理';card.append(sc)}
     const q=document.createElement('div');q.className='quote';q.textContent='「'+t.quote+'」 '+t.refs.map(id=>'#'+(Number(id.slice(1))+1)).join(' ');q.title='在实时字幕中定位原话';q.onclick=()=>{setTab('feed');const row=rendered.get(t.refs[0]);if(row){stick=false;row.scrollIntoView({block:'center',behavior:'smooth'})}};
-    card.prepend(h);card.append(h4,q);
-    if(t.status==='confirm'){const acts=document.createElement('div');acts.className='decide';const run=document.createElement('button');run.className='primary';run.textContent='执行';run.onclick=()=>decideTask(t,true);const skip=document.createElement('button');skip.textContent='忽略';skip.onclick=()=>decideTask(t,false);acts.append(run,skip);card.append(acts)}
+    card.prepend(h);card.append(h4);if(t.quote)card.append(q);if(t.plan&&['confirm','planning','queued','running'].includes(t.status)){const pl=document.createElement('div');pl.className='md';pl.innerHTML=markdown(t.plan);card.append(pl)}
+    if(t.status==='confirm'){const acts=document.createElement('div');acts.className='decide';const run=document.createElement('button');run.className='primary';run.textContent=t.todo?'开始执行':'执行';run.onclick=()=>decideTask(t,true);const skip=document.createElement('button');skip.textContent='忽略';skip.onclick=()=>decideTask(t,false);acts.append(run,skip);card.append(acts)}
     if(t.result){const md=document.createElement('div');md.className='md';md.innerHTML=markdown(t.result);card.append(md)}
     if(t.error){const e=document.createElement('div');e.className='err';e.textContent=t.error;card.append(e)}
     box.append(card)}}
@@ -476,12 +540,81 @@ function renderTasks(m){const tasks=m.aiTasks||[];const box=$('ailist');
 // The whole-meeting minutes (product minutes specification), written in the background; shown here so the meeting page in the
 // conversation's right panel has everything the plugin page has.
 let minutesError='';
-function renderMinutes(m){const box=$('minutes');const mi=m.minutes;const key=JSON.stringify([m.id,mi&&mi.state,mi&&mi.at,mi&&mi.error,s_live(m),minutesError]);if(box.dataset.key===key)return;box.dataset.key=key;box.replaceChildren();
+function renderMinutes(m){const box=$('minutes');const mi=m.minutes;const pr=m.preps;const key=JSON.stringify([m.id,mi&&mi.state,mi&&mi.at,mi&&mi.error,s_live(m),minutesError,pr&&[pr.state,pr.at,pr.error],todoKey(m)]);if(box.dataset.key===key)return;box.dataset.key=key;const focused=document.activeElement&&document.activeElement.dataset&&document.activeElement.dataset.draft;box.replaceChildren();
   const make=label=>{const b=document.createElement('button');b.className='make';b.textContent=label;b.onclick=makeMinutes;return b};
   if(mi&&mi.state==='working'){const e=document.createElement('div');e.className='ai-empty';e.innerHTML='<b>正在生成纪要</b>按纪要规范整理整场会议，长会议需要一两分钟。';box.append(e);return}
-  if(mi&&mi.markdown){const bar=document.createElement('div');bar.className='minutes-bar';const t=document.createElement('span');t.textContent=(mi.at?'生成于 '+new Date(mi.at).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}):'')+(s_live(m)?' · 会议仍在进行，可稍后重新生成':'');const again=document.createElement('button');again.textContent='重新生成';again.onclick=makeMinutes;bar.append(t,again);const md=document.createElement('div');md.className='md';md.innerHTML=markdown(mi.markdown);box.append(bar,md);if(mi.state==='failed'&&mi.error){const e=document.createElement('div');e.className='err';e.textContent=mi.error;box.append(e)}return}
+  if(mi&&mi.markdown){const bar=document.createElement('div');bar.className='minutes-bar';const t=document.createElement('span');t.textContent=(mi.at?'生成于 '+new Date(mi.at).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}):'')+(s_live(m)?' · 会议仍在进行，可稍后重新生成':'');const again=document.createElement('button');again.textContent='重新生成';again.onclick=makeMinutes;bar.append(t,again);const md=document.createElement('div');md.className='md';md.innerHTML=markdown(mi.markdown);box.append(bar,md);if(mi.state==='failed'&&mi.error){const e=document.createElement('div');e.className='err';e.textContent=mi.error;box.append(e)}const todos=todoSection(m);if(todos)box.append(todos);if(focused){const t=box.querySelector('[data-draft="'+CSS.escape(focused)+'"]');if(t){t.focus();t.setSelectionRange(t.value.length,t.value.length)}}return}
   const e=document.createElement('div');e.className='ai-empty';const b=document.createElement('b');b.textContent=mi&&mi.state==='failed'?'纪要没有生成':'还没有会议纪要';e.append(b,document.createTextNode(mi&&mi.state==='failed'?(mi.error||'请重试'):s_live(m)?'会议结束后会自动生成，也可以现在先生成一版。':'按纪要规范整理会议概览、核心方向、关键决策和待办。'));e.append(make(mi&&mi.state==='failed'?'重新生成':'生成纪要'));if(minutesError){const x=document.createElement('div');x.className='err';x.textContent=minutesError;e.append(x)}box.append(e)}
 async function makeMinutes(){busy=true;minutesError='';try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'minutes'})});if(!r.ok){const j=await r.json().catch(()=>({}));throw Error(j.error||'纪要没有生成，请重试')}}catch(e){minutesError=e.message}finally{busy=false;await refresh()}}
+// ---- 待办处理 ----
+// Every action item of the minutes, with what was done for it: a message prepared after the minutes (kinds listed by the
+// service), a plan waiting to be confirmed, work running in the background conversation, its result, or marked done by hand.
+const PREP_KIND={message:'沟通消息'};let prepError='',todoError='';const todoUi={open:new Set(),edit:new Map(),busy:new Set(),filter:'all',ver:0};const drafts=new Map();
+const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n};
+const todosOf=md=>{const lines=(md||'').split('\n');const start=lines.findIndex(l=>/^#{1,3}\s*待办/.test(l.trim()));if(start<0)return[];const out=[];for(const l of lines.slice(start+1)){if(/^#{1,3}\s/.test(l.trim()))break;const x=l.trim().match(/^(?:[-*+]|\d+[.、)])\s+(.+)$/);if(x)out.push(x[1].trim())}return out};
+function todoRows(m){const tasks=m.aiTasks||[];const preps=(m.preps&&m.preps.items)||[];const marked=m.todoDone||[];
+  return todosOf(m.minutes&&m.minutes.markdown).map(todo=>{const mine=tasks.filter(t=>t.todo===todo).sort((a,b)=>a.createdAt-b.createdAt);const task=mine.at(-1)||null;const result=[...mine].reverse().find(t=>t.status==='done')||null;const prep=preps.find(p=>p.todo===todo)||null;
+    const s=task&&task.status;const state=marked.includes(todo)?'marked':s==='planning'?'planning':s==='confirm'?'plan':s==='queued'||s==='running'?'running':result?'done':prep?'prepared':'todo';
+    return{todo,task,result,prep,state}})}
+const TODO_GROUP={todo:'todo',planning:'todo',plan:'todo',prepared:'prepared',running:'running',done:'done',marked:'done'};
+const TODO_ST={todo:['待处理',''],planning:['制定计划中','run'],plan:['待确认计划','wait'],prepared:['已准备','ok'],running:['处理中','run'],done:['已完成','ok'],marked:['已完成','gray']};
+const todoKey=m=>JSON.stringify([(m.aiTasks||[]).filter(t=>t.todo).map(t=>[t.id,t.status,t.plan,t.result,t.error]),m.todoDone,m.preps&&m.preps.items.map(i=>i.body),todoUi.ver,todoError,prepError]);
+const rerenderTodos=()=>{todoUi.ver++;if(latest&&latest.meeting)renderMinutes(latest.meeting)};
+const ago=ms=>{const s=Math.max(0,Math.round((Date.now()-ms)/1000));return s<60?s+' 秒':Math.floor(s/60)+' 分 '+(s%60)+' 秒'};
+setInterval(()=>{for(const e of document.querySelectorAll('[data-since]'))e.textContent=ago(Number(e.dataset.since))},1000);
+async function todoPost(body,key){todoUi.busy.add(key);todoError='';rerenderTodos();try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok){const j=await r.json().catch(()=>({}));throw Error(j.error||'操作没有完成，请重试')}return true}catch(e){todoError=e.message;return false}finally{todoUi.busy.delete(key);await refresh();rerenderTodos()}}
+function todoSection(m){const rows=todoRows(m);const pr=m.preps;if(!rows.length&&!pr)return null;
+  const wrap=el('section','todos');const head=el('div','todos-head');head.append(el('b',null,'待办处理'));
+  const count=g=>rows.filter(r=>TODO_GROUP[r.state]===g).length;const parts=[rows.length+' 条'];for(const [g,l] of [['prepared','已准备'],['running','处理中'],['done','已完成']])if(count(g))parts.push(l+' '+count(g));
+  head.append(el('span',null,parts.join(' · ')));
+  const working=pr&&pr.state==='working';
+  if(rows.length&&!working){const again=el('button',null,pr?'重新准备消息':'准备沟通消息');again.title='为需要找人沟通的待办写好消息';again.onclick=makePreps;head.append(again)}
+  wrap.append(head);
+  const note=text=>wrap.append(el('p','note',text));
+  if(working)note('正在为需要沟通的待办写好消息，约半分钟。');
+  if(pr&&pr.state==='failed')note(pr.error||'消息没有准备成功，请重试');
+  if(prepError)note(prepError);if(todoError)note(todoError);
+  if(pr&&!working&&pr.forMinutes&&m.minutes.at&&pr.forMinutes!==m.minutes.at)note('纪要已重新生成，沟通消息是按旧纪要准备的，可点“重新准备消息”。');
+  if(!rows.length)return wrap;
+  const chips=el('div','todo-filters');for(const [g,l] of [['all','全部'],['todo','待处理'],['prepared','已准备'],['running','处理中'],['done','已完成']]){const n=g==='all'?rows.length:count(g);if(g==='running'&&!n)continue;const b=el('button',todoUi.filter===g?'on':null,l+' '+n);b.onclick=()=>{todoUi.filter=g;rerenderTodos()};chips.append(b)}
+  wrap.append(chips);
+  const shown=rows.filter(r=>todoUi.filter==='all'||TODO_GROUP[r.state]===todoUi.filter);if(!shown.length)note('没有这类待办。');
+  for(const r of shown)wrap.append(todoRow(r));
+  return wrap}
+function todoRow(r){const row=el('article','todo-row '+r.state);row.dataset.todo=r.todo;const line=el('div','todo-line');const [label,cls]=TODO_ST[r.state];line.append(el('span','todo-st '+cls,label),el('div','t',r.todo));row.append(line);
+  const busy=k=>todoUi.busy.has(r.todo+'|'+k);
+  const btn=(text,fn,pri,k)=>{const b=el('button',pri?'pri':null,k&&busy(k)?'处理中…':text);b.disabled=!!(k&&busy(k));b.onclick=fn;return b};
+  const acts=(...buttons)=>{const a=el('div','todo-acts');a.append(...buttons);row.append(a)};
+  const hint=(text,err)=>{const h=el('div','todo-hint'+(err?' err':''),text);row.append(h);return h};
+  const box=(title,meta,content,md,dim)=>{const b=el('div','todo-box'+(dim?' dim':''));const h=el('div','todo-box-head');h.append(el('b',null,title));if(meta)h.append(el('span',null,meta));b.append(h);const open=todoUi.open.has(r.todo);
+    const body=md?el('div','md'):el('div','todo-body');if(md)body.innerHTML=markdown(content);else body.textContent=content;if(!open&&content.length>120)body.classList.add('clip');b.append(body);row.append(b);return content.length>120};
+  const toggle=()=>{todoUi.open.has(r.todo)?todoUi.open.delete(r.todo):todoUi.open.add(r.todo);rerenderTodos()};
+  const editor=(mode,placeholder,action,extra)=>{if(todoUi.edit.get(r.todo)!==mode)return;const key=r.todo+'|'+mode;const w=el('div','todo-edit');const t=el('textarea');t.placeholder=placeholder;t.dataset.draft=key;t.value=drafts.get(key)||'';t.oninput=()=>drafts.set(key,t.value);
+    const go=async()=>{const text=t.value.trim();if(!text){t.focus();return}if(await todoPost({action,text,...extra},mode)){drafts.delete(key);todoUi.edit.delete(r.todo)}};
+    w.append(t);row.append(w);acts(btn(mode==='rewrite'?'改写':mode==='replan'?'重新生成计划':'发送给AI 助手',go,true,mode),btn('取消',()=>{todoUi.edit.delete(r.todo);rerenderTodos()}))};
+  const edit=mode=>()=>{todoUi.edit.set(r.todo,mode);rerenderTodos()};
+  const hand=btn('✦ 交给AI 助手处理',()=>todoPost({action:'todoHand',todo:r.todo},'hand'),true,'hand');
+  const mark=btn('标记已完成',()=>todoPost({action:'todoMark',todo:r.todo,done:true},'mark'),false,'mark');
+  const copy=text=>btn('复制',()=>copyText(text).then(ok=>notice(ok?'已复制，可以直接粘贴发送':'没能复制，请手动选中文字复制')),true);
+  const t=r.task;
+  if(r.state==='prepared'){const p=r.prep;const long=box(PREP_KIND[p.kind]||p.kind,p.to?'发给 '+p.to:'',p.body,false);
+    if(todoUi.edit.get(r.todo)==='rewrite')editor('rewrite','想怎么改？例如：语气更正式一些、加上周三前回复','prepRewrite',{todo:r.todo});
+    else acts(copy(p.body),...(long?[btn(todoUi.open.has(r.todo)?'收起':'展开',toggle)]:[]),btn('让AI 助手改写',edit('rewrite')),hand,mark);
+    if(t&&t.status==='failed')hint(t.error||'没有处理成功',true);}
+  else if(r.state==='todo'){acts(hand,mark);if(t&&t.status==='failed')hint(t.error||'没有处理成功，可以重新交给AI 助手',true);else hint('AI 助手 会先给出处理计划，你确认后再开始。')}
+  else if(r.state==='planning'){if(t.plan)box('处理计划','正在按你的意见修改…',t.plan,true,true);hint(t.plan?'AI 助手 正在修改计划…':'AI 助手 正在写处理计划，约半分钟…')}
+  else if(r.state==='plan'){box('处理计划','AI 助手 · 等你确认',t.plan||'',true);if(t.error)hint(t.error,true);
+    if(todoUi.edit.get(r.todo)==='replan')editor('replan','想怎么改？例如：先只查近一个月的数据','todoReplan',{taskId:t.id});
+    else acts(btn('开始执行',()=>todoPost({action:'taskDecide',taskId:t.id,run:true},'run'),true,'run'),btn('修改计划',edit('replan')),btn('不处理了',()=>todoPost({action:'taskDecide',taskId:t.id,run:false},'skip'),false,'skip'))}
+  else if(r.state==='running'){const h=hint('AI 助手 正在后台处理，已用 ');const s=el('span',null,ago(t.startedAt||t.createdAt));s.dataset.since=String(t.startedAt||t.createdAt);const a=el('a',null,'在 AI 执行中查看');a.onclick=()=>{setTab('ai');const c=document.querySelector('[data-task="'+t.id+'"]');if(c)c.scrollIntoView({block:'nearest'})};h.append(s,' · ',a)}
+  else if(r.state==='done'){const d=r.result;const at=d.finishedAt?new Date(d.finishedAt).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}):'';const long=box('处理结果','AI 助手'+(at?' · '+at:''),d.result||d.error||'（没有返回内容）',true);
+    if(t&&t.status==='failed')hint('补充要求没有处理成功：'+(t.error||'请重试'),true);
+    if(todoUi.edit.get(r.todo)==='follow')editor('follow','还需要什么？例如：再补充竞品的数据','todoFollow',{taskId:d.id});
+    else acts(copy(d.result||''),...(long?[btn(todoUi.open.has(r.todo)?'收起':'查看完整结果',toggle)]:[]),btn('继续补充要求',edit('follow')),mark)}
+  else if(r.state==='marked')acts(btn('撤销',()=>todoPost({action:'todoMark',todo:r.todo,done:false},'mark'),false,'mark'));
+  return row}
+async function copyText(text){try{await navigator.clipboard.writeText(text);return true}catch{const t=document.createElement('textarea');t.value=text;t.style.position='fixed';t.style.opacity='0';document.body.append(t);t.select();let ok=false;try{ok=document.execCommand('copy')}catch{}t.remove();return ok}}
+async function makePreps(){prepError='';try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'preps'})});if(!r.ok){const j=await r.json().catch(()=>({}));throw Error(j.error||'没有准备成功，请重试')}}catch(e){prepError=e.message}finally{await refresh()}}
 $('stop').onclick=()=>post({action:'stop'});$('summary').onclick=()=>post({action:'summarize'});$('retry').onclick=()=>post({action:'retry'});
 let noticeTimer=0;
 function notice(text,ms){$('notice').textContent=text;$('notice').hidden=false;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>$('notice').hidden=true,ms||3500)}
@@ -496,7 +629,7 @@ if(matchMedia('(max-width:900px)').matches){document.body.classList.remove('pane
 setInterval(()=>{const m=latest&&latest.meeting;if(m)$('clock').textContent=time((m.endedAt||Date.now())-m.startedAt)},1000);
 setInterval(()=>{const m=latest&&latest.meeting;const on=m&&m.phase==='recording';let i=0;for(const bar of wave.children){const shape=.55+.45*Math.sin(Date.now()/180+i*1.3);bar.style.height=on?Math.max(3,Math.round(3+11*level*shape*(.6+Math.random()*.4)))+'px':'3px';i++}},120);
 
-async function pollSelection(){const m=latest&&latest.meeting;if(!m){return}try{const r=await fetch(new URL('api/selection',location.href),{cache:'no-store'});if(!r.ok)return;const data=await r.json();const pick=[...data.selected].reverse().map(id=>resolvePick(id,m)).find(Boolean);const keyNow=pick?pick.id+'|'+pick.refs.join(','):'';if(keyNow===citeFor)return;citeFor=keyNow;showCite(pick,m)}catch{}}
+async function pollSelection(){const m=latest&&latest.meeting;if(!m){return}try{const r=await fetch(new URL('api/selection',location.href),{cache:'no-store'});if(!r.ok)return;const data=await r.json();if(liveMapOpen)return;const pick=[...data.selected].reverse().map(id=>resolvePick(id,m)).find(Boolean);const keyNow=pick?pick.id+'|'+pick.refs.join(','):'';if(keyNow===citeFor)return;citeFor=keyNow;showCite(pick,m)}catch{}}
 const SUBS={proposal:'提出的方案',risk:'风险与顾虑'};const OUT=['decision','action','question'];const subOf=i=>i.sub||SUBS[i.kind]||'讨论要点';
 /** A selected card, discussion block or group summary, as something with a title, text and cited segments. */
 function resolvePick(id,m){
@@ -510,7 +643,129 @@ function showCite(item,m){cited=new Set(item?item.refs:[]);for(const [id,node] o
   if(!document.body.classList.contains('panel-open')){document.body.classList.add('panel-open');$('toggle').setAttribute('aria-pressed','true')}
   const first=rendered.get(item.refs.find(id=>rendered.has(id)));if(first){stick=false;first.scrollIntoView({block:'center',behavior:'smooth'})}}
 $('citeClose').onclick=()=>showCite(null);
-setInterval(pollSelection,500);
+// Time links from the conversation: "?at=seconds" when a link opened this tab, or a jump the meeting service relays when a
+// link opened while this page was already showing (that tab closes itself). The caption spoken at that moment is shown.
+let wantAt=(()=>{const v=new URLSearchParams(location.search).get('at')??new URLSearchParams(location.hash.slice(1)).get('at');return v!==null&&v!==''&&Number.isFinite(Number(v))?Number(v)*1000:null})(),focusSeen=null;
+if(wantAt!==null)history.replaceState(null,'',location.pathname);
+function followTimeLink(focus){
+  if(focusSeen===null)focusSeen=focus?focus.nonce:0; // requests made before this page opened are not for it
+  else if(focus&&focus.nonce!==focusSeen){focusSeen=focus.nonce;wantAt=focus.atMs}
+  if(wantAt!==null&&showMoment(wantAt))wantAt=null}
+function showMoment(ms){
+  const lines=latest.meeting.segments.filter(s=>rendered.has(s.id));if(!lines.length)return false;
+  const line=[...lines].reverse().find(s=>s.startMs<=ms+500)||lines[0];const row=rendered.get(line.id);
+  setTab('feed');stick=false;row.scrollIntoView({block:'center',behavior:'smooth'});row.classList.remove('flash');void row.offsetWidth;row.classList.add('flash');return true}
+const expandedMapGroups=new Set();
+const mapLabels={decision:'结论',action:'待办',question:'待确认',risk:'风险',proposal:'方案',point:'要点',step:'步骤',status:'进度',cell:'对比'};
+const mapPriority=Object.keys(mapLabels);
+let liveMapOpen=supportsLiveMap,mapRenderKey='';
+
+function renderFormMenu(meeting){
+  const plan=meeting?.plan;
+  const boardForm=plan?.form || latest?.settings?.defaultForm || 'mindmap';
+  const current=liveMapOpen ? LIVE_MAP_FORM : FORMS.find(form=>form[0]===boardForm) || FORMS[0];
+  $('formLabel').textContent=current[1];
+  $('formBy').textContent=liveMapOpen||!plan ? '默认' : meeting.requestedForm ? '切换中' : plan.lockedBy==='user' ? '已指定' : 'AI 选择';
+  for(const button of $('menu').querySelectorAll('button[data-form]')){
+    const selected=button.dataset.form===current[0];
+    button.classList.toggle('on',selected);
+    button.setAttribute('aria-checked',String(selected));
+  }
+}
+
+async function selectForm(form){
+  closeMenu();
+  $('formBtn').focus();
+  if(form===LIVE_MAP_FORM[0]){
+    setStageMode(true);
+    return;
+  }
+  const meeting=latest?.meeting;
+  const boardForm=meeting?.plan?.form || latest?.settings?.defaultForm || 'mindmap';
+  const returningFromMap=liveMapOpen;
+  setStageMode(false);
+  // Reopening the existing canvas is a view switch, including for a historical meeting.
+  if(!returningFromMap || form!==boardForm) await post({action:'layout',form});
+}
+
+function renderLiveMap(meeting){
+  const panel=$('liveMap');
+  const items=meeting.items?.length ? meeting.items : (meeting.notes??[]).map(note=>({
+    group:note.topic,kind:note.kind,text:note.text,refs:note.segmentIds
+  }));
+  const theme=meeting.plan?.theme || meeting.title;
+  const empty=latest.settings?.autoSummary===false
+    ? '自动整理已关闭，可打开字幕面板并点「立即整理」。'
+    : s_live(meeting) ? '正在等待会议要点，整理完成后会显示在这里。' : '这场会议还没有整理出的要点。';
+  const segments=new Map(meeting.segments.filter(segment=>rendered.has(segment.id)).map(segment=>[segment.id,segment]));
+  const key=JSON.stringify([meeting.id,theme,items,empty,[...expandedMapGroups], [...segments.keys()]]);
+  if(key===mapRenderKey)return;
+  mapRenderKey=key;
+  const groups=new Map();
+  for(const item of items){
+    if(!item.text)continue;
+    const group=item.group || '综合讨论';
+    if(!groups.has(group))groups.set(group,[]);
+    groups.get(group).push(item);
+  }
+  const focusKey=panel.contains(document.activeElement) ? document.activeElement.dataset.mapFocus : null;
+  const heading=el('h2',null,theme);
+  const branches=el('div','live-map-branches');
+  for(const [group,entries] of groups){
+    const branch=el('section','live-map-branch');
+    const list=el('ul');
+    branch.append(el('h3',null,group),list);
+    const rank=kind=>mapPriority.includes(kind) ? mapPriority.indexOf(kind) : mapPriority.length;
+    const sorted=[...entries].sort((a,b)=>rank(a.kind)-rank(b.kind));
+    const expanded=expandedMapGroups.has(group);
+    for(const [index,item] of (expanded ? sorted : sorted.slice(0,3)).entries()){
+      const card=el('li','live-map-card');
+      card.append(el('b',null,mapLabels[item.kind]||'要点'),el('span',null,item.text));
+      const segment=(item.refs??[]).map(id=>segments.get(id)).find(Boolean);
+      if(segment){
+        const jump=el('button',null,time(segment.startMs));
+        jump.dataset.mapFocus=JSON.stringify([group,index]);
+        jump.setAttribute('aria-label','查看 '+time(segment.startMs)+' 的字幕原文');
+        jump.onclick=()=>showMoment(segment.startMs);
+        card.append(jump);
+      }
+      list.append(card);
+    }
+    if(sorted.length>3){
+      const more=el('button','live-map-more',expanded ? '收起' : '展开其余 '+(sorted.length-3)+' 条');
+      more.dataset.mapFocus=group;
+      more.setAttribute('aria-expanded',String(expanded));
+      more.onclick=()=>{
+        if(expanded)expandedMapGroups.delete(group);
+        else expandedMapGroups.add(group);
+        renderLiveMap(latest.meeting);
+      };
+      const tail=el('li');
+      tail.append(more);
+      list.append(tail);
+    }
+    branches.append(branch);
+  }
+  panel.replaceChildren(heading,groups.size ? branches : el('p','live-map-empty',empty));
+  if(focusKey){
+    const button=[...panel.querySelectorAll('button')].find(node=>node.dataset.mapFocus===focusKey);
+    button?.focus({preventScroll:true});
+  }
+}
+function setStageMode(showMap){
+  liveMapOpen=showMap;
+  $('liveMap').hidden=!showMap;
+  $('board').closest('.stage').classList.toggle('is-map',showMap);
+  renderFormMenu(latest?.meeting);
+  if(showMap){
+    $('listening').hidden=true;
+    citeFor='';
+    showCite(null);
+    if(latest?.meeting)renderLiveMap(latest.meeting);
+  }
+}
+setStageMode(liveMapOpen);
+setInterval(()=>{if(!liveMapOpen)void pollSelection()},500);
 
 let current=null;
 let ASR_HINT={'large-v3-turbo-q5_0':'推荐 · 574MB','large-v3-turbo':'更准 · 1.6GB',small:'较快 · 488MB'};
@@ -518,7 +773,7 @@ async function openSettings(){try{const r=await fetch(new URL('api/settings',loc
   $('sEngineRow').hidden=!env.cloudAsr;$('sEngine').value=current.asrEngine==='local'?'local':'cloud';
   const sel=$('sAsr');sel.replaceChildren();const add=(v,t)=>{const o=document.createElement('option');o.value=v;o.textContent=t;sel.append(o)};add('','自动'+(env.defaultAsrModel?'（'+env.defaultAsrModel+'）':''));const have=env.asrModels||[];
   for(const name of new Set([...Object.keys(ASR_HINT),...have,...(current.asrModel?[current.asrModel]:[])]))add(name,name+(ASR_HINT[name]?' · '+ASR_HINT[name]:'')+(have.includes(name)?'（已安装）':'（选择后自动下载）'));
-  sel.value=current.asrModel||'';$('sLang').value=current.language;$('sScript').value=current.script;$('sVocab').value=current.vocabulary;$('sVad').value=current.vad;$('sChunk').value=String(current.chunkSecs);$('sClean').checked=current.cleanup;$('sAuto').checked=current.autoSummary;$('sAiTasks').checked=current.aiTasks!==false;scenes=(current.scenarios||[]).map(x=>({...x}));paintScenes();$('sRewrite').checked=current.rewrite!==false;$('sRewriteModel').value=current.rewriteModel||'';fillModels(data.models||[],current.rewriteModel);syncRewrite();$('sForm').value=current.defaultForm;syncScript();
+  sel.value=current.asrModel||'';$('sLang').value=current.language;$('sScript').value=current.script;$('sVocab').value=current.vocabulary;$('sVad').value=current.vad;$('sChunk').value=String(current.chunkSecs);$('sClean').checked=current.cleanup;$('sAuto').checked=current.autoSummary;$('sAiTasks').checked=current.aiTasks!==false;$('sPrep').checked=current.prepTodos!==false;scenes=(current.scenarios||[]).map(x=>({...x}));paintScenes();$('sRewrite').checked=current.rewrite!==false;$('sRewriteModel').value=current.rewriteModel||'';fillModels(data.models||[],current.rewriteModel);syncRewrite();$('sForm').value=current.defaultForm;syncScript();
   const live=latest&&latest.meeting&&['starting','recording','paused','stopping'].includes(latest.meeting.phase);$('sNote').textContent=live?'识别模型、语言、名词、静音和分段从下一场会议生效；其余立即生效':'保存后用于新会议';
   $('drawer').hidden=false;$('scrim').hidden=false}catch{dismissed='';toast('暂时读取不到设置，请稍后重试')}}
 function closeSettings(){$('drawer').hidden=true;$('scrim').hidden=true}
@@ -547,7 +802,7 @@ function paintScenes(){const list=$('sceneList');list.replaceChildren();
   $('sceneWarn').hidden=!scenes.some(x=>!x.when.trim()||!x.action.trim())}
 function addScene(when,action){scenes.push({id:'c'+Date.now().toString(36),when:when||'',action:action||'',confirm:true,enabled:true});paintScenes()}
 $('sceneAdd').onclick=()=>addScene();
-$('sSave').onclick=async()=>{if(!current)return;const next={...current,scenarios:scenes.map(x=>({...x,when:x.when.trim(),action:x.action.trim()})).filter(x=>x.when&&x.action),asrModel:$('sAsr').value||null,asrEngine:$('sEngine').value==='local'?'local':'cloud',language:$('sLang').value,script:$('sScript').value,vocabulary:$('sVocab').value.trim(),vad:$('sVad').value,chunkSecs:Number($('sChunk').value),cleanup:$('sClean').checked,autoSummary:$('sAuto').checked,aiTasks:$('sAiTasks').checked,rewrite:$('sRewrite').checked,rewriteModel:chosenModel(),defaultForm:$('sForm').value};
+$('sSave').onclick=async()=>{if(!current)return;const next={...current,scenarios:scenes.map(x=>({...x,when:x.when.trim(),action:x.action.trim()})).filter(x=>x.when&&x.action),asrModel:$('sAsr').value||null,asrEngine:$('sEngine').value==='local'?'local':'cloud',language:$('sLang').value,script:$('sScript').value,vocabulary:$('sVocab').value.trim(),vad:$('sVad').value,chunkSecs:Number($('sChunk').value),cleanup:$('sClean').checked,autoSummary:$('sAuto').checked,aiTasks:$('sAiTasks').checked,prepTodos:$('sPrep').checked,rewrite:$('sRewrite').checked,rewriteModel:chosenModel(),defaultForm:$('sForm').value};
   $('sSave').disabled=true;try{const r=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'settings',settings:next})});if(!r.ok)throw Error();closeSettings()}catch{dismissed='';toast('设置没有保存成功，请重试')}finally{$('sSave').disabled=false}};
 let polling=false;setInterval(async()=>{if(!polling){polling=true;await refresh();polling=false}},1000);refresh();
 // ---- board size ----

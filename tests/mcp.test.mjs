@@ -50,7 +50,7 @@ test('an agent connects over stdio, lists the tools and reads, opens and exports
     const opened = await t.call('meeting_open', { id });
     assert.equal(opened.value.openedInBrowser, false); assert.equal(opened.value.organisingModel, null);
     const html = await (await fetch(opened.value.url)).text();
-    assert.match(html, /<title>会议白板<\/title>/); assert.match(html, /<body class="no-ai /, 'background AI tasks are hidden');
+    assert.match(html, /<title>会议白板<\/title>/); assert.match(html, /<body data-live-map /); assert.match(html, /<body[^>]*class="no-ai /, 'background AI tasks are hidden');
     const state = await (await fetch(new URL('api', opened.value.url))).json();
     assert.equal(state.snapshot.meeting.id, id); assert.equal(state.snapshot.settings.aiTasks, false); assert.equal(state.snapshot.settings.autoSummary, false, 'no organising model: live organising stays off');
     assert.match((await t.call('meeting_control', { action: 'jump' })).error, /pause、resume 或 stop/);
@@ -108,7 +108,7 @@ test('with an agent CLI installed, work asked for in the meeting is on; every ag
     const opened = await t.call('meeting_open', { id });
     assert.equal(opened.value.taskRunner, 'claude'); assert.equal(opened.value.assistantName, '小助'); assert.equal(opened.value.organisingModel, 'claude（本机命令行）');
     const html = await (await fetch(opened.value.url)).text();
-    assert.doesNotMatch(html, /<body class="no-ai /); assert.doesNotMatch(html, /AI 助手/); assert.match(html, /会上说“小助，帮我……”/);
+    assert.doesNotMatch(html, /<body[^>]*class="no-ai /); assert.doesNotMatch(html, /AI 助手/); assert.match(html, /会上说“小助，帮我……”/);
     const state = await (await fetch(new URL('api', opened.value.url))).json();
     assert.equal(state.snapshot.settings.aiTasks, true);
     assert.equal(state.snapshot.settings.autoSummary, true, 'the agent CLI organises the board: live organising is on without an API key');

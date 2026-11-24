@@ -235,3 +235,27 @@ export function minutesMeta(startedAt: number, endedAt: number | null): string {
   return when + (endedAt && endedAt > startedAt ? " · " + Math.max(1, Math.round((endedAt - startedAt) / 60000)) + " 分钟" : "");
 }
 
+
+/**
+ * Short Markdown from the assistant (a plan, a result) as HTML: every character is escaped first, then only headings, lists,
+ * bold, inline code and http(s) links get tags.
+ */
+export function lightMarkdown(source: string): string {
+  const span = (text: string) => escapeHtml(text)
+    .replace(/\x60([^\x60]+)\x60/g, "<code>$1</code>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, "<a href=\"$2\" target=\"_blank\" rel=\"noreferrer\">$1</a>");
+  const out: string[] = []; let list: "ul" | "ol" | null = null;
+  const close = () => { if (list) { out.push("</" + list + ">"); list = null; } };
+  for (const raw of source.replace(/\r/g, "").split("\n")) {
+    const line = raw.trim();
+    const bullet = line.match(/^[-*+]\s+(.+)$/), numbered = line.match(/^\d+[.)、]\s*(.+)$/), heading = line.match(/^#{1,6}\s+(.+)$/);
+    const kind = bullet ? "ul" : numbered ? "ol" : null;
+    if (kind) { if (list !== kind) { close(); out.push("<" + kind + ">"); list = kind; } out.push("<li>" + span((bullet ?? numbered)![1]) + "</li>"); continue; }
+    close();
+    if (!line) continue;
+    out.push(heading ? "<p><strong>" + span(heading[1]) + "</strong></p>" : "<p>" + span(line) + "</p>");
+  }
+  close();
+  return out.join("");
+}

@@ -28,7 +28,7 @@ import { wakePattern, type Assistant } from "../server/tasks";
 import { cliGenerate, cliSessions, listModels, pickRunner, type ModelChoice } from "./runner";
 import { apiAsrConfig, apiTranscriber } from "../server/api-asr";
 
-const VERSION = "1.6.1";
+const VERSION = "1.7.0";
 // stdout carries the protocol only; anything else a dependency prints goes to stderr.
 console.log = console.info = (...args: unknown[]) => console.error(...args);
 const env = process.env;
@@ -187,7 +187,7 @@ async function startPrimary(): Promise<Handlers> {
     if (!modelCache || Date.now() - modelCache.at > 300000) { const list = readModels().catch(() => []); modelCache = { at: Date.now(), list }; void list.then(found => { if (!found.length) modelCache = null; }); }
     return modelCache.list;
   };
-  const browser = new MeetingBrowser(meetings, boards, here("../web/index.html"), id => boardErrors.get(id) ?? null, html => (runner ? html : html.replace("<body class=\"", "<body class=\"no-ai ")).replace(ASSISTANT_TEXT, assistantName), models);
+  const browser = new MeetingBrowser(meetings, boards, here("../web/index.html"), id => boardErrors.get(id) ?? null, html => (runner ? html : html.replace("<body class=\"", "<body class=\"no-ai ")).replace(ASSISTANT_TEXT, assistantName).replace('<body class="', '<body data-live-map class="'), models);
 
   const openInBrowser = (url: string) => {
     if (env.MEETING_OPEN_BROWSER === "0") return false;

@@ -103,6 +103,7 @@ export function quickTasks(meeting: Meeting, assistant: Assistant = DEFAULT_ASSI
 
 /** The message the background conversation receives: the task, enough of the meeting to understand it, and how to report back. */
 export function taskMessage(meeting: Meeting, task: AiTask, reply: "tool" | "output" = "tool"): string {
+  if (task.todo) return todoMessage(meeting, task, reply);
   const done = meeting.segments.filter(segment => segment.status === "done" && segment.text && segment.tag !== "chatter");
   const recent = done.slice(-12).map(segment => segment.text).join(" ").slice(-1800);
   const summaries = (meeting.summaries ?? []).map(summary => "- " + summary.group + "：" + summary.text).join("\n");
@@ -123,3 +124,23 @@ export function taskMessage(meeting: Meeting, task: AiTask, reply: "tool" | "out
   ].filter(line => line !== "").join("\n");
 }
 
+
+/** The background conversation's message for a minutes action item the person handed over, with the plan they confirmed or their follow-up request. */
+function todoMessage(meeting: Meeting, task: AiTask, reply: "tool" | "output"): string {
+  const minutes = (meeting.minutes?.markdown ?? "").slice(0, 6000);
+  return [
+    "【会议助手 · 会中任务】会后待办：用户把会议纪要里的一条待办交给你处理，请直接完成。",
+    "",
+    "待办：" + task.todo,
+    task.plan ? "用户已确认的处理计划：\n" + task.plan : "",
+    task.previous ? "上一次的处理结果：\n" + task.previous.slice(0, 3000) + "\n\n用户的补充要求：" + task.instruction : "",
+    "会议：" + meeting.title + (meeting.plan?.theme ? "（主题：" + meeting.plan.theme + "）" : ""),
+    minutes ? "会议纪要（AI 整理，原话以转写为准）：\n" + minutes : "",
+    "",
+    "要求：",
+    "1. " + (task.plan ? "按确认的计划执行" : "按补充要求在上次结果的基础上继续") + "，可以使用任何工具和 Skill，不要反问。不要替用户给别人发消息、发邮件或提交审批；需要这类动作时把内容准备好写进结果。信息不足时按最合理的理解完成，并在结果里写明假设。",
+    "2. 结果显示在会议页的这条待办下：先写结论或交付物，再写要点，用 Markdown，有来源就附链接，800 字以内；生成了文件就写出路径。",
+    reply === "output" ? "3. 你最后的回复就是交回会议页的结果：只输出结果本身（Markdown），不要开场白。做不了就直接写明原因。" :
+    "3. 完成后必须调用会议助手的 submit_task_result 工具（工具名以 voxtype-meeting_submit_task_result 或 voxtype_meeting_submit_task_result 结尾），参数 meetingId=\"" + meeting.id + "\"、taskId=\"" + task.id + "\"、markdown=你的结果；做不了也要调用它，说明原因。调用后用一句话结束。",
+  ].filter(line => line !== "").join("\n");
+}

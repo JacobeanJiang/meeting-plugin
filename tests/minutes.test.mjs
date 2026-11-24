@@ -5,7 +5,7 @@ const load = async entry => { const b = await build({ entryPoints: [entry], bund
 const { generateMinutes, TRANSCRIPT_LIMIT } = await load('src/server/minutes.ts');
 const { MINUTES_PROMPT } = await load('src/server/minutes-prompt.ts');
 const { parseMinutes, renderMinutesHtml, parseTodo, parseDecision, minutesDocument } = await load('src/minutes-format.ts');
-export const SAMPLE = "# 会议纪要：S4版本资源排期评审\n# 会议概览\n- **主题**：S4版本资源与BUG修复排期\n- **核心目标**：\n1.对齐S4版本美术资源进度\n2.确认战斗模块BUG修复优先级\n\n# 核心方向\n- 按核心议题、业务逻辑和篇幅重心组织；可对适当重要信息加粗，数据严格依据原文提取，禁止虚构\n## 一.S4版本：资源进度同步\n### 1.美术资源交付\n- 交付进度：角色立绘交付率**90%**，场景资源剩余3张\n- 风险：特效资源依赖外包，交付时间**待确认**\n### 2.其他相关进展\n- 音效：主城BGM已完成混音\n## 二.战斗模块：BUG修复与数值平衡\n### 1.BUG修复排期\n- P0问题：技能连招卡顿需本周修复 <script>alert(1)</script>\n\n# 关键决策\n- 【S4版本】上线节奏：本轮只做主城与第一章，第二章延后\n- 【战斗模块】修复优先级：P0 问题优先于数值平衡\n\n# 待办事项\n- 【战斗模块】修复技能连招卡顿 @张三 @李四；协作方：开发、湖南侧（下周三前）\n- 【S4版本】确认特效外包交付时间 @王五\n- 【跨项目协作】同步主城BGM至S3版本；协作方：音频组";
+export const SAMPLE = "# 会议纪要：S4版本资源排期评审\n# 会议概览\n- **主题**：S4版本资源与BUG修复排期\n- **核心目标**：\n1.对齐S4版本美术资源进度\n2.确认战斗模块BUG修复优先级\n\n# 核心方向\n- 按核心议题、业务逻辑和篇幅重心组织；可对适当重要信息加粗，数据严格依据原文提取，禁止虚构\n## 一.S4版本：资源进度同步\n### 1.美术资源交付\n- 交付进度：角色立绘交付率**90%**，场景资源剩余3张\n- 风险：特效资源依赖外包，交付时间**待确认**\n### 2.其他相关进展\n- 音效：主城BGM已完成混音\n## 二.战斗模块：BUG修复与数值平衡\n### 1.BUG修复排期\n- P0问题：技能连招卡顿需本周修复 <script>alert(1)</script>\n\n# 关键决策\n- 【S4版本】上线节奏：本轮只做主城与第一章，第二章延后\n- 【战斗模块】修复优先级：P0 问题优先于数值平衡\n\n# 待办事项\n- 【战斗模块】修复技能连招卡顿 @张三 @李四；协作方：开发、区域团队（下周三前）\n- 【S4版本】确认特效外包交付时间 @王五\n- 【跨项目协作】同步主城BGM至S3版本；协作方：音频组";
 const seg = (seq, text) => ({ id: 's' + seq, seq, startMs: seq * 15000, endMs: (seq + 1) * 15000, status: 'done', text, error: null, tag: null });
 
 const SKELETON = "# 会议纪要：S4版本资源排期评审\n# 会议概览\n- **主题**：S4版本资源与BUG修复排期\n- **核心目标**：\n1.对齐S4版本美术资源进度\n\n# 核心方向\n## 一.S4版本：资源进度同步\n### 1.美术资源交付\n### 2.其他相关进展\n## 二.战斗模块：BUG修复\n### 1.BUG修复排期";
@@ -13,17 +13,18 @@ const scopeOf = prompt => prompt.split('## 本次输出范围\n')[1] ?? '';
 const fake = calls => async input => {
   calls.push(input); const scope = scopeOf(input.prompt);
   if (scope.startsWith('本次只输出纪要骨架')) return { text: '```markdown\n' + SKELETON + '\n```', model: 'm' };
-  if (scope.includes('关键决策')) return { text: '好的\n# 关键决策\n- 【S4版本】上线节奏：本轮只做主城\n\n# 待办事项\n- 【战斗模块】修复技能连招卡顿 @张三（本周）', model: 'm' };
+  if (scope.includes('“# 关键决策”这一个模块')) return { text: '好的\n# 关键决策\n- 【S4版本】上线节奏：本轮只做主城', model: 'm' };
+  if (scope.includes('“# 待办事项”这一个模块')) return { text: '# 待办事项\n- 【战斗模块】修复技能连招卡顿 @张三（本周）', model: 'm' };
   const topic = scope.match(/中的“(.+?)”。/)?.[1] ?? '?';
   return { text: '### 不该出现的标题\n- 要点：' + topic + '的内容', model: 'm' };
 };
 
 test('minutes are built in short requests: skeleton, one per sub-topic, then decisions and actions; the prompt is used verbatim', async () => {
-  assert.equal(MINUTES_PROMPT.length, 9632); assert.equal(MINUTES_PROMPT.split('$' + '{contents}').length, 2);
+  assert.equal(MINUTES_PROMPT.length, 9637); assert.equal(MINUTES_PROMPT.split('$' + '{contents}').length, 2);
   const [before, after] = MINUTES_PROMPT.split('$' + '{contents}');
   const calls = [];
   const result = await generateMinutes({ segments: [seg(0, '我们 S4 先做主城'), seg(1, '好的'), { ...seg(2, ''), status: 'empty' }, { ...seg(3, 'x'), status: 'failed' }] }, fake(calls), 'chosen');
-  assert.equal(calls.length, 1 + 3 + 1, 'skeleton, three sub-topics, decisions and actions'); assert.equal(result.parts, 5);
+  assert.equal(calls.length, 1 + 3 + 2, 'skeleton, three sub-topics, decisions, actions'); assert.equal(result.parts, 6);
   for (const call of calls) {
     assert.equal(call.model, 'chosen');
     assert.ok(call.prompt.startsWith(before), 'prompt text before the placeholder unchanged');
@@ -65,7 +66,7 @@ test('the minutes Markdown renders as structured, escaped HTML', () => {
   assert.equal((html.match(/class="m-card"/g) || []).length, 2, 'one card per core direction');
   assert.match(html, /<b class="m-key">交付进度<\/b>角色立绘交付率<strong>90%<\/strong>/);
   assert.equal((html.match(/class="m-decision"/g) || []).length, 2);
-  assert.deepEqual(parseTodo('【战斗模块】修复技能连招卡顿 @张三 @李四；协作方：开发、湖南侧（下周三前）'), { tag: '战斗模块', task: '修复技能连招卡顿', people: ['张三', '李四'], teams: '开发、湖南侧', due: '下周三前' });
+  assert.deepEqual(parseTodo('【战斗模块】修复技能连招卡顿 @张三 @李四；协作方：开发、区域团队（下周三前）'), { tag: '战斗模块', task: '修复技能连招卡顿', people: ['张三', '李四'], teams: '开发、区域团队', due: '下周三前' });
   assert.equal(parseTodo('【文档】发送 PPT；协作方：供方。').teams,'供方');
   assert.deepEqual(parseTodo('【S4版本】确认特效外包交付时间'), { tag: 'S4版本', task: '确认特效外包交付时间', people: [], teams: null, due: null });
   assert.deepEqual(parseDecision('【S4版本】上线节奏：本轮只做主城与第一章'), { tag: 'S4版本', title: '上线节奏', body: '本轮只做主城与第一章' });
@@ -92,4 +93,15 @@ test('the minutes follow a length budget set by how much was said', async () => 
   assert.match(scopeOf(topic.prompt), /只写 1–3 条最重要的要点，每条不超过 50 字/);
   const under = result.markdown.split('### 1.美术资源交付\n')[1].split('\n###')[0].split('\n').filter(line => line.startsWith('- '));
   assert.equal(under.length, 4, 'a model that ignores the budget is held to one point more than asked');
+});
+
+test('a long meeting: decisions and action items are asked for separately; one that times out leaves the rest of the minutes', async () => {
+  const segments = Array.from({ length: 200 }, (_, i) => seg(i, '第' + i + '段：讨论接口排期、测试资源和上线时间，小王负责联调，周五前给结论。'));
+  const calls = [];
+  const generate = async input => { const scope = scopeOf(input.prompt); calls.push(scope ? 'ask' : 'condense'); if (scope.includes('“# 待办事项”这一个模块')) throw Error('PLUGIN_SERVICE_TIMEOUT'); return fake([])(input); };
+  const result = await generateMinutes({ segments }, generate, null);
+  assert.ok(calls.filter(kind => kind === 'condense').length >= 3, 'a transcript over 8 000 characters is condensed in short parts');
+  assert.match(result.markdown, /# 关键决策\n- 【S4版本】/);
+  assert.match(result.markdown, /# 待办事项\n\n本部分没有生成成功/);
+  assert.doesNotMatch(result.markdown.split('# 待办事项')[1], /^- /m, 'the note is not an action item');
 });
