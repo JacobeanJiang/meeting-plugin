@@ -235,10 +235,17 @@ body:not(.panel-open) .panel{display:none}
 .line.cited{background:linear-gradient(90deg,rgba(255,77,46,.08),rgba(255,77,46,0) 85%);border-radius:10px;margin:0 -10px;padding-left:64px;padding-right:10px}
 .line.cited time{left:10px}.line.cited .no{left:10px;color:var(--rec)}
 .line.cited p{color:var(--ink)}
+.line .turn{position:relative}
+.line .turn+.turn{margin-top:10px}
+.line .turn time{left:-54px;top:2px}
+.line .who{display:block;font-size:12px;line-height:1.6;font-weight:600;color:var(--ink)}
+.line .who.waiting{color:var(--muted);font-weight:500}
+.line .draft{color:var(--muted)}
+.line.still,.line.live{animation:none}
 .line.flash{animation:lineflash 2.6s ease-out}
 @keyframes lineflash{0%,35%{background:rgba(255,186,48,.30);border-radius:10px;box-shadow:0 0 0 6px rgba(255,186,48,.30)}100%{background:transparent;box-shadow:0 0 0 6px transparent}}
 .line.chatter p{color:#b8b3aa;font-size:13px}
-.line.chatter time::after{content:"闲聊";margin-left:6px;padding:0 5px;border-radius:4px;background:var(--paper);color:var(--muted);font-family:-apple-system,"PingFang SC",sans-serif;font-size:10px}
+.line.chatter .turn:first-of-type time+*::after{content:"闲聊";margin-left:6px;padding:0 5px;border-radius:4px;background:var(--paper);color:var(--muted);font-family:-apple-system,"PingFang SC",sans-serif;font-size:10px;font-weight:400}
 .cite{display:flex;align-items:flex-start;gap:8px;margin:0 12px 6px;padding:10px 12px;border-radius:12px;background:var(--ink);color:#fff;font-size:12.5px;animation:pop .2s var(--ease) both}
 .cite[hidden]{display:none}
 .cite span{flex:1;min-width:0}.cite b{display:block;font-weight:600;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -394,7 +401,7 @@ const LIVE_MAP_FORM=['live-map','实时导图','固定排版，随会议整理�
 if(supportsLiveMap)FORMS[0][2]='可编辑白板，按议题和观点展开';
 const viewForms=supportsLiveMap ? [LIVE_MAP_FORM,...FORMS] : FORMS;
 const ICON={pause:'<svg width="12" height="12" viewBox="0 0 12 12"><rect x="2" y="1.5" width="2.6" height="9" rx="1" fill="currentColor"/><rect x="7.4" y="1.5" width="2.6" height="9" rx="1" fill="currentColor"/></svg>',play:'<svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 1.8v8.4c0 .5.5.8.9.5l6.4-4.2a.6.6 0 0 0 0-1L3.9 1.3c-.4-.3-.9 0-.9.5Z" fill="currentColor"/></svg>'};
-let latest=null,busy=false,loaded='',level=0,stick=true,toastKey='',dismissed='',cited=new Set(),citeFor='',seenChange=0,deltaTimer=0;const rendered=new Map();
+let latest=null,busy=false,loaded='',level=0,stick=true,toastKey='',dismissed='',cited=new Set(),citeFor='',seenChange=0,deltaTimer=0,turns={},liveRows=null,liveSpeakers=true;const rendered=new Map();
 const time=ms=>{const n=Math.max(0,Math.floor(ms/1000));const h=Math.floor(n/3600),m=Math.floor(n%3600/60),s=n%60;return (h?h+':'+String(m).padStart(2,'0'):String(m).padStart(2,'0'))+':'+String(s).padStart(2,'0')};
 const wave=$('wave');for(let i=0;i<7;i++)wave.append(document.createElement('i'));
 for(const [form,name,hint,glyph] of viewForms){const b=document.createElement('button');b.setAttribute('role','menuitemradio');b.dataset.form=form;const g=document.createElement('span');g.className='glyph';g.setAttribute('aria-hidden','true');g.textContent=glyph;const t=document.createElement('span');const n=document.createElement('b');n.textContent=name;const e=document.createElement('em');e.textContent=hint;t.append(n,e);b.append(g,t);b.onclick=()=>selectForm(form);$('menu').append(b)}
@@ -432,6 +439,9 @@ function render(data){
   if(loaded!==data.boardUrl){$('board').src=data.boardUrl;loaded=data.boardUrl}
   else if(data.boardSpace&&boardSpace&&data.boardSpace!==boardSpace)setTimeout(fitBoard,1200); // redrawn for a different screen size: fit once the new layout is in
   if(data.boardSpace)boardSpace=data.boardSpace;
+  turns=data.turns||{};
+  liveRows=data.live||null;
+  liveSpeakers=data.liveSpeakers!==false;
   renderFeed(m,latest.pending);renderTasks(m);renderMinutes(m);
   if(liveMapOpen) renderLiveMap(m);
   followTimeLink(data.focus);
@@ -443,16 +453,54 @@ function render(data){
 function renderFeed(m,pending){
   const feed=$('feed');const nearBottom=feed.scrollHeight-feed.scrollTop-feed.clientHeight<80;
   const shown=m.segments.filter(s=>s.status==='done'||s.status==='failed');
+  const streaming=!!liveRows;
+  // Speaker names show once the meeting has speaker recognition; a sentence whose voiceprint result has not arrived yet says so.
+  const named=(m.speakerChanges||[]).length>0||(streaming&&liveSpeakers);
+  const who=turn=>el('b','who'+(turn.pending?' waiting':''),turn.pending?'识别中':turn.name||'未识别');
+  const liveList=liveRows||[];
   const keep=new Set(shown.map(s=>s.id));for(const [id,node] of rendered)if(!keep.has(id)){node.remove();rendered.delete(id)}
   let added=false;
+  // A caption saved while live text is (or was just) on screen takes over text already shown, so it appears without fading in.
+  const shownLive=$('liveRow');const takingOver=streaming||!!(shownLive&&!shownLive.hidden);
   for(const s of shown){let node=rendered.get(s.id);
-    if(!node){node=document.createElement('div');node.className='line';const t=document.createElement('time');t.className='num';const no=document.createElement('span');no.className='no num';node.append(t,no,document.createElement('p'));node.dataset.id=s.id;rendered.set(s.id,node);added=true}
-    node.querySelector('time').textContent=time(s.startMs);node.querySelector('.no').textContent='#'+(s.seq+1);node.classList.toggle('chatter',s.tag==='chatter');node.classList.toggle('cited',cited.has(s.id));const p=node.querySelector('p');p.textContent=s.status==='done'?(showRaw&&s.raw?s.raw:s.text):'这段没有识别成功，录音已保留，会后可重试';p.title=s.raw?(showRaw?'AI 校对后：'+s.text:'原始识别：'+s.raw):'';node.classList.toggle('failed',s.status==='failed');}
+    if(!node){node=document.createElement('div');node.className='line'+(takingOver?' still':'');node.dataset.id=s.id;rendered.set(s.id,node);added=true}
+    node.classList.toggle('chatter',s.tag==='chatter');node.classList.toggle('cited',cited.has(s.id));node.classList.toggle('failed',s.status==='failed');
+    // One row per speaker: who, when, what they said. Names appear only when the meeting has speaker recognition.
+    const rows=s.status==='done'?(turns[s.id]||[{startMs:s.startMs,name:null,text:s.text,raw:s.raw||s.text}]):[{startMs:s.startMs,name:null,text:'这段没有识别成功，录音已保留，会后可重试',raw:''}];
+    // Redrawn only when what it shows changes, so the refresh every second leaves unchanged captions alone.
+    const key=JSON.stringify([named,showRaw,s.status,s.seq,rows]);
+    if(node.dataset.key!==key){node.dataset.key=key;node.replaceChildren(el('span','no num','#'+(s.seq+1)),...rows.map(turn=>{
+      const row=el('div','turn');row.append(el('time','num',time(turn.startMs)));
+      if(named&&s.status==='done')row.append(who(turn));
+      const p=el('p',null,showRaw&&s.raw?turn.raw:turn.text);if(s.raw)p.title=showRaw?'AI 校对后：'+turn.text:'原始识别：'+turn.raw;row.append(p);
+      return row;
+    }))}
+  }
   $('rawToggle').hidden=!shown.some(s=>s.raw);
-  const ordered=shown.map(s=>rendered.get(s.id));ordered.forEach((node,i)=>{node.classList.toggle('now',i===ordered.length-1&&s_live(m));if(feed.children[i]!==node)feed.insertBefore(node,feed.children[i]||null)});
+  const ordered=shown.map(s=>rendered.get(s.id));
+  // The red bar marks what is being said now: the live text while streaming, otherwise the newest caption.
+  ordered.forEach((node,i)=>node.classList.toggle('now',!streaming&&i===ordered.length-1&&s_live(m)));
+  // What is being said now, as the recogniser hears it before its chunk is saved; unfinished sentences are grey.
+  // Rows are updated in place: only changed text is rewritten, nothing is rebuilt or faded in again.
+  let liveNode=$('liveRow');if(!liveNode){liveNode=el('div','line live now');liveNode.id='liveRow'}
+  while(liveNode.children.length>liveList.length)liveNode.lastChild.remove();
+  liveList.forEach((turn,i)=>{
+    let row=liveNode.children[i];if(!row){row=el('div','turn');row.append(el('time','num'),el('b'),el('p'));liveNode.append(row)}
+    const [stamp,label,p]=row.children;
+    const at=time(turn.startMs);if(stamp.textContent!==at)stamp.textContent=at;
+    label.hidden=!named;const tag=who(turn);if(label.className!==tag.className)label.className=tag.className;if(label.textContent!==tag.textContent)label.textContent=tag.textContent;
+    const text=JSON.stringify(turn.parts);
+    if(p.dataset.key!==text){p.dataset.key=text;added=true;p.replaceChildren(...turn.parts.flatMap((part,j)=>[...(j?[document.createTextNode('\n')]:[]),el('span',part.definite?null:'draft',part.text)]))}
+  });
+  liveNode.hidden=!liveList.length;
   let pend=$('pendingRow');if(!pend){pend=document.createElement('div');pend.id='pendingRow';pend.className='pending';pend.innerHTML='<span class="dots"><i></i><i></i><i></i></span><span></span>'}
-  pend.hidden=!pending;pend.lastChild.textContent='正在识别'+(pending>1?' '+pending+' 段':'');feed.append(pend);
-  let empty=$('emptyRow');if(!shown.length&&!pending){if(!empty){empty=document.createElement('div');empty.id='emptyRow';empty.className='empty'}const live=s_live(m);empty.innerHTML='';const b=document.createElement('b');b.textContent=live?'正在倾听':'没有识别到发言';empty.append(b,document.createTextNode(live?'说话后约 15 秒，文字会出现在这里；安静的片段不会显示。':'这场会议没有识别到有效发言。'));feed.prepend(empty)}else if(empty)empty.remove();
+  pend.hidden=!pending||streaming;const pendText='正在识别'+(pending>1?' '+pending+' 段':'');if(pend.lastChild.textContent!==pendText)pend.lastChild.textContent=pendText;
+  let empty=$('emptyRow');const showEmpty=!shown.length&&!pending&&!liveList.length;
+  if(showEmpty){if(!empty){empty=document.createElement('div');empty.id='emptyRow';empty.className='empty';empty.append(el('b'),document.createTextNode(''))}const live=s_live(m);const title=live?'正在倾听':'没有识别到发言';const hint=!live?'这场会议没有识别到有效发言。':streaming?'说话时文字会实时出现在这里。':'说话后约 '+((latest.settings&&latest.settings.chunkSecs)||15)+' 秒，文字会出现在这里；安静的片段不会显示。';if(empty.firstChild.textContent!==title)empty.firstChild.textContent=title;if(empty.lastChild.textContent!==hint)empty.lastChild.textContent=hint}
+  else if(empty)empty.remove();
+  // Children move only when out of place: moving a node in the page restarts its fade-in, which looked like flicker.
+  const wanted=[...(showEmpty?[empty]:[]),...ordered,liveNode,pend];
+  wanted.forEach((node,i)=>{if(feed.children[i]!==node)feed.insertBefore(node,feed.children[i]||null)});
   if(added){if(stick||nearBottom){feed.scrollTop=feed.scrollHeight;$('jump').hidden=true}else $('jump').hidden=false}
 }
 const s_live=m=>['starting','recording','paused','stopping'].includes(m.phase);
@@ -770,7 +818,7 @@ setInterval(()=>{if(!liveMapOpen)void pollSelection()},500);
 let current=null;
 let ASR_HINT={'large-v3-turbo-q5_0':'推荐 · 574MB','large-v3-turbo':'更准 · 1.6GB',small:'较快 · 488MB'};
 async function openSettings(){try{const r=await fetch(new URL('api/settings',location.href),{cache:'no-store'});if(!r.ok)throw Error();const data=await r.json();current=data.settings;const env=data.environment||{};if(env.asrChoices)ASR_HINT=Object.fromEntries(env.asrChoices.map(c=>[c.name,c.label]));
-  $('sEngineRow').hidden=!env.cloudAsr;$('sEngine').value=current.asrEngine==='local'?'local':'cloud';
+  $('sEngineRow').hidden=!env.cloudAsr;$('sEngine').options[0].text=env.voiceprintTest?'流式字幕与说话人识别（测试环境）':'云端识别';$('sEngine').value=current.asrEngine==='local'?'local':'cloud';
   const sel=$('sAsr');sel.replaceChildren();const add=(v,t)=>{const o=document.createElement('option');o.value=v;o.textContent=t;sel.append(o)};add('','自动'+(env.defaultAsrModel?'（'+env.defaultAsrModel+'）':''));const have=env.asrModels||[];
   for(const name of new Set([...Object.keys(ASR_HINT),...have,...(current.asrModel?[current.asrModel]:[])]))add(name,name+(ASR_HINT[name]?' · '+ASR_HINT[name]:'')+(have.includes(name)?'（已安装）':'（选择后自动下载）'));
   sel.value=current.asrModel||'';$('sLang').value=current.language;$('sScript').value=current.script;$('sVocab').value=current.vocabulary;$('sVad').value=current.vad;$('sChunk').value=String(current.chunkSecs);$('sClean').checked=current.cleanup;$('sAuto').checked=current.autoSummary;$('sAiTasks').checked=current.aiTasks!==false;$('sPrep').checked=current.prepTodos!==false;scenes=(current.scenarios||[]).map(x=>({...x}));paintScenes();$('sRewrite').checked=current.rewrite!==false;$('sRewriteModel').value=current.rewriteModel||'';fillModels(data.models||[],current.rewriteModel);syncRewrite();$('sForm').value=current.defaultForm;syncScript();

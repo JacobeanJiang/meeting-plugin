@@ -141,14 +141,42 @@ test('cloud speech recognition is off unless a transcription model is configured
   const t = await start();
   try {
     const off = await t.call('meeting_open', { id });
-    assert.equal(off.value.speechRecognition, '本机识别');
+    assert.match(off.value.speechRecognition, /^本机识别/);
     assert.equal((await (await fetch(new URL('api/settings', off.value.url))).json()).environment.cloudAsr, false);
   } finally { await t.close(); }
   const u = await start({ MEETING_ASR_MODEL: 'whisper-1', MEETING_ASR_BASE_URL: 'http://127.0.0.1:9/v1', MEETING_ASR_API_KEY: 'k' });
   try {
     const on = await u.call('meeting_open', { id });
-    assert.match(on.value.speechRecognition, /^whisper-1（云端接口/);
+    assert.match(on.value.speechRecognition, /^whisper-1（第三方识别接口/);
     assert.equal((await (await fetch(new URL('api/settings', on.value.url))).json()).environment.cloudAsr, true);
   } finally { await u.close(); }
 });
 
+
+test('a third-party recogniser and live captions can be set in <home>/config.json; the environment wins and a broken file is reported', async () => {
+  const t = await start();
+  await t.close(true);
+  try {
+    await writeFile(path.join(t.home, 'config.json'), JSON.stringify({ MEETING_ASR_MODEL: 'whisper-large-v3-turbo', MEETING_ASR_BASE_URL: 'http://127.0.0.1:9/v1', MEETING_ASR_API_KEY: 'file-key', IGNORED: 'x' }));
+    let session = connect(t.home);
+    let opened = await session.call('meeting_open', { id });
+    assert.match(opened.value.speechRecognition, /^whisper-large-v3-turbo（第三方识别接口/);
+    assert.equal(opened.value.liveCaptions, true, 'live captions are on by default');
+    assert.equal(opened.value.configProblem, undefined);
+    const settings = await (await fetch(new URL('api/settings', opened.value.url))).json();
+    assert.equal(settings.environment.cloudAsr, true, 'the page offers to switch back to local recognition');
+    assert.equal(settings.environment.voiceprintTest, undefined);
+    await session.end();
+    session = connect(t.home, { MEETING_ASR_MODEL: 'env-model', MEETING_LIVE_CAPTIONS: '0' });
+    opened = await session.call('meeting_open', { id });
+    assert.match(opened.value.speechRecognition, /^env-model/); assert.equal(opened.value.liveCaptions, false);
+    await session.end();
+    await writeFile(path.join(t.home, 'config.json'), '{ not json');
+    session = connect(t.home);
+    opened = await session.call('meeting_open', { id });
+    assert.match(opened.value.configProblem, /config\.json/); assert.match(opened.value.speechRecognition, /^本机识别/);
+    const read = await session.call('meeting_read', { id });
+    assert.equal(read.value.liveCaption, null);
+    await session.end();
+  } finally { await rm(t.home, { recursive: true, force: true }); }
+});

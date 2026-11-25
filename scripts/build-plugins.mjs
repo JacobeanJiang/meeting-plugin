@@ -10,7 +10,7 @@ const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const repository = 'https://github.com/JacobeanJiang/meeting-plugin';
 const description = 'Record meetings from the microphone with local transcription, a live self-organising board, Q&A about what was said, work handed to the agent during the meeting, and structured minutes.';
 const keywords = ['meeting', 'minutes', 'transcription', 'whisper', 'whiteboard', 'mind-map', 'mcp'];
-const passEnv = ['MEETING_LLM_API_KEY', 'MEETING_LLM_BASE_URL', 'MEETING_LLM_MODEL', 'OPENAI_API_KEY', 'MEETING_TASK_RUNNER', 'MEETING_ASSISTANT_NAME', 'MEETING_WAKE_WORDS', 'MEETING_TASK_CWD', 'MEETING_ASSISTANT_HOME', 'MEETING_OPEN_BROWSER', 'MEETING_NODE'];
+const passEnv = ['MEETING_LLM_API_KEY', 'MEETING_LLM_BASE_URL', 'MEETING_LLM_MODEL', 'OPENAI_API_KEY', 'MEETING_ASR_MODEL', 'MEETING_ASR_BASE_URL', 'MEETING_ASR_API_KEY', 'MEETING_ASR_TIMEOUT_MS', 'MEETING_LIVE_CAPTIONS', 'MEETING_LIVE_INTERVAL_MS', 'MEETING_TASK_RUNNER', 'MEETING_ASSISTANT_NAME', 'MEETING_WAKE_WORDS', 'MEETING_TASK_CWD', 'MEETING_ASSISTANT_HOME', 'MEETING_OPEN_BROWSER', 'MEETING_NODE'];
 const pluginRoot = '${CLAUDE_PLUGIN_ROOT}';
 const targets = [
   { from: 'macos', name: 'meeting-assistant', label: 'Meeting Assistant', os: 'macOS', codex: { command: 'sh', args: ['./bin/start.sh'] }, claude: { command: 'sh', args: [pluginRoot + '/bin/start.sh'] } },

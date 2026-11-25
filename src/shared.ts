@@ -28,7 +28,14 @@ export const SCENARIO_EXAMPLES: { when: string; action: string }[] = [
   { when: "会上定下了待办和负责人", action: "整理成待办清单：事项、负责人、截止时间" },
 ];
 export const DEFAULT_SETTINGS: Settings = { binaryPath: "", model: null, autoSummary: true, chunkSecs: 15, asrModel: null, language: "zh", script: "simplified", vocabulary: "", vad: "standard", cleanup: true, defaultForm: "mindmap", aiTasks: true, rewrite: true, rewriteModel: null, asrEngine: "cloud", scenarios: [], prepTodos: true };
+export type VoiceUtterance = { startMs: number; endMs: number; text: string };
+export type SpeakerChange = { atMs: number; name: string | null };
+/** A sentence heard by the streaming recogniser; definite=false while the speaker is still saying it. */
+export type LiveSentence = VoiceUtterance & { definite: boolean };
+/** What the streaming recogniser has heard but is not yet in a saved caption, how far its speaker results reach and how much audio it has received. speakers=false: no speaker recognition, so no names are shown. */
+export type LiveCaption = { sentences: LiveSentence[]; speakerThrough: number; heardMs: number; speakers?: boolean };
 export type Segment = {
+  utterances?: VoiceUtterance[];
   id: string; seq: number; startMs: number; endMs: number;
   status: "pending" | "transcribing" | "done" | "empty" | "failed";
   text: string; error: string | null;
@@ -79,6 +86,7 @@ export type RoundChange = { at: number; added: number; revised: number; linked: 
 export type Meeting = {
   id: string; title: string; startedAt: number; endedAt: number | null;
   phase: "starting" | "recording" | "paused" | "stopping" | "complete" | "interrupted";
+  speakerChanges?: SpeakerChange[];
   segments: Segment[]; notes: Note[]; summaryThrough: number; summaryAt: number | null;
   summaryState: "idle" | "working" | "failed"; summaryError: string | null;
   error: string | null; plan: MeetingPlan | null; items: BoardItem[]; links: BoardLink[]; summaries: GroupSummary[]; lastChange: RoundChange | null;
@@ -125,8 +133,8 @@ export type Preps = { state: "idle" | "working" | "failed"; at: number | null; f
 export type AiTask = { id: string; instruction: string; quote: string; refs: string[]; status: "planning" | "confirm" | "queued" | "running" | "done" | "failed" | "skipped"; createdAt: number; startedAt: number | null; finishedAt: number | null; result: string | null; error: string | null; turnId: string | null; scenario?: string | null; todo?: string | null; plan?: string | null; previous?: string | null };
 /** Recognition model preparation, done automatically after install: checking, downloading with progress, ready, or failed with a reason. */
 export type Setup = { status: "checking" | "downloading" | "ready" | "failed"; model: string; received: number; total: number; error: string | null };
-export type Snapshot = { settings: Settings; meeting: Meeting | null; levelDbfs: number | null; pending: number; history: { id: string; title: string; startedAt: number; phase: string; theme: string }[]; setup: Setup };
-export type Environment = { supported: boolean; binary: string | null; version: string | null; error: string | null; asrModels: string[]; defaultAsrModel: string | null; setup: Setup; asrChoices: { name: string; label: string }[]; cloudAsr?: boolean };
+export type Snapshot = { settings: Settings; meeting: Meeting | null; levelDbfs: number | null; pending: number; history: { id: string; title: string; startedAt: number; phase: string; theme: string }[]; setup: Setup; live?: LiveCaption | null };
+export type Environment = { supported: boolean; binary: string | null; version: string | null; error: string | null; asrModels: string[]; defaultAsrModel: string | null; setup: Setup; asrChoices: { name: string; label: string }[]; cloudAsr?: boolean; voiceprintTest?: boolean };
 /** Models the plugin downloads by itself, for the settings menus. */
 export const ASR_CHOICES: { name: string; label: string }[] = [{ name: "large-v3-turbo-q5_0", label: "推荐 · 574MB" }, { name: "large-v3-turbo", label: "更准 · 1.6GB" }, { name: "small", label: "较快 · 488MB" }];
 /** Windows recognises on the CPU: small keeps up with a live meeting, the large models need a fast processor. */
@@ -141,6 +149,65 @@ export function setupText(setup: Setup | null | undefined): string | null {
 export function stamp(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   return String(Math.floor(seconds / 60)).padStart(2, "0") + ":" + String(seconds % 60).padStart(2, "0");
+}
+/** pending: the voiceprint results for this speech have not arrived yet, so the page shows "识别中" instead of a name. */
+export type SpeakerTurn = { startMs: number; name: string | null; pending: boolean; text: string; raw: string };
+/** Voiceprint results arrive about once a second, each for the 4 s just heard, so up to 2 s after a sentence still counts towards it. */
+const SPEAKER_LAG_MS = 2000;
+/** Speech with no voiceprint result after this much more audio is shown as unrecognised. */
+const SPEAKER_GIVE_UP_MS = 8000;
+/**
+ * Who said a stretch of speech. Names heard while it was spoken come first, most frequent first. Without any, the result in
+ * effect when it ended applies (the same person going on). While the stream's results do not yet reach past it, it is pending.
+ */
+export function speakerFor(changes: SpeakerChange[], startMs: number, endMs: number, live?: LiveCaption | null): { names: string[]; pending: boolean } {
+  const counts = new Map<string, number>();
+  for (const change of changes) if (change.name && change.atMs > startMs && change.atMs <= endMs + SPEAKER_LAG_MS) counts.set(change.name, (counts.get(change.name) ?? 0) + 1);
+  if (counts.size) return { names: [...counts.keys()].sort((a, b) => counts.get(b)! - counts.get(a)!), pending: false };
+  if (live && live.speakerThrough < endMs + SPEAKER_LAG_MS && live.heardMs < endMs + SPEAKER_GIVE_UP_MS) return { names: [], pending: true };
+  const atEnd = changes.filter(change => change.atMs <= endMs).at(-1)?.name;
+  return { names: atEnd ? [atEnd] : [], pending: false };
+}
+/** A caption as who said what: streamed sentences take one speaker each and consecutive sentences by the same person are joined. Captions recognised as a whole list everyone heard during them. live: the recording's stream, while speaker results are still coming. */
+export function speakerTurns(segment: Segment, changes: SpeakerChange[], live?: LiveCaption | null): SpeakerTurn[] {
+  const sentences = segment.utterances?.length ? segment.utterances : null;
+  if (!sentences) {
+    const speaker = speakerFor(changes, segment.startMs, segment.endMs, live);
+    return [{ startMs: segment.startMs, name: speaker.names.join("、") || null, pending: speaker.pending, text: segment.text, raw: segment.raw ?? segment.text }];
+  }
+  // Proofreading keeps one line per sentence; if the lines no longer match, show the sentences as recognised.
+  const lines = segment.text.split("\n");
+  const texts = sentences.length === 1 ? [segment.text] : lines.length === sentences.length ? lines : sentences.map(sentence => sentence.text);
+  const turns: SpeakerTurn[] = [];
+  sentences.forEach((sentence, index) => {
+    const speaker = speakerFor(changes, sentence.startMs, sentence.endMs, live);
+    const name = speaker.names[0] ?? null;
+    const last = turns.at(-1);
+    if (last && last.name === name && last.pending === speaker.pending) { last.text += "\n" + texts[index]; last.raw += "\n" + sentence.text; }
+    else turns.push({ startMs: sentence.startMs, name, pending: speaker.pending, text: texts[index], raw: sentence.text });
+  });
+  return turns;
+}
+/** A live row: who, from when, and the sentences they said, each final or still being spoken. */
+export type LiveTurn = { startMs: number; name: string | null; pending: boolean; parts: { text: string; definite: boolean }[] };
+/**
+ * The live sentences grouped the way a saved caption groups them (consecutive sentences by the same speaker share a row),
+ * so the rows look the same once the caption is saved. A sentence still being spoken stays "识别中" until a name is heard
+ * for it, so it does not flip to unrecognised and back as it grows.
+ */
+export function liveTurns(live: LiveCaption, changes: SpeakerChange[]): LiveTurn[] {
+  const turns: LiveTurn[] = [];
+  for (const sentence of live.sentences) {
+    if (!sentence.text) continue;
+    const speaker = speakerFor(changes, sentence.startMs, sentence.endMs, live);
+    const pending = speaker.pending || (!sentence.definite && !speaker.names.length);
+    const name = pending ? null : speaker.names[0] ?? null;
+    const last = turns.at(-1);
+    const part = { text: sentence.text, definite: sentence.definite };
+    if (last && last.name === name && last.pending === pending) last.parts.push(part);
+    else turns.push({ startMs: sentence.startMs, name, pending, parts: [part] });
+  }
+  return turns;
 }
 export function markdown(meeting: Meeting): string {
   const lines = ["# " + meeting.title, "", "开始：" + new Date(meeting.startedAt).toLocaleString(), "", "摘要覆盖至第 " + (meeting.summaryThrough + 1) + " 段；识别和 AI 整理均需核对。", ""];

@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { MeetingController } from "./controller";
 import type { MeetingBoards } from "./board";
+import { liveTurns, speakerTurns } from "../shared";
 export class MeetingBrowser {
   private server: Server | null = null;
   private base = "";
@@ -52,7 +53,10 @@ export class MeetingBrowser {
           const boardUrl = await this.boards.open(meetingId,snapshot.meeting!.title);
           // Content on the board besides the title, including what the conversation wrote there: the page stops showing "listening" once there is any.
           const boardItems = (await this.boards.read(meetingId).catch(() => null))?.documents.filter(doc => doc.id !== "meeting-title" && doc.id !== "meeting-theme").length ?? 0;
-          response.end(JSON.stringify({ snapshot, boardUrl, boardError: this.boardError(meetingId), boardItems, boardSpace: this.controller.boardSpace(), focus: this.focus.get(meetingId) ?? null })); return;
+          const changes = snapshot.meeting!.speakerChanges ?? [];
+          const turns = Object.fromEntries(snapshot.meeting!.segments.filter(segment => segment.status === "done").map(segment => [segment.id, speakerTurns(segment, changes, snapshot.live)]));
+          const live = snapshot.live ? liveTurns(snapshot.live, changes) : null;
+          response.end(JSON.stringify({ snapshot, boardUrl, boardError: this.boardError(meetingId), boardItems, boardSpace: this.controller.boardSpace(), turns, live, liveSpeakers: snapshot.live?.speakers !== false, focus: this.focus.get(meetingId) ?? null })); return;
         }
         if (request.method === "POST" && match?.[2] === "api") {
           if (origin !== this.base || !request.headers["content-type"]?.startsWith("application/json")) { response.writeHead(403);response.end();return; }
@@ -62,7 +66,7 @@ export class MeetingBrowser {
           if (body.action === "settings") { await this.controller.configure((body as { settings?: unknown }).settings); response.end(JSON.stringify({ ok: true })); return; }
           if (body.action === "viewport") { this.controller.setViewport("page:" + match![1].slice(0, 12), Number((body as { width?: unknown }).width)); response.end(JSON.stringify({ ok: true, space: this.controller.boardSpace() })); return; }
           // A new meeting or another record: the page navigates to that meeting's own address.
-          if (body.action === "new") { const { snapshot } = await this.controller.newMeeting(String((body as { title?: unknown }).title ?? "").slice(0, 200)); response.end(JSON.stringify({ ok: true, url: await this.open(snapshot.meeting!.id) })); return; }
+          if (body.action === "new") { const meeting = this.controller.view(meetingId).meeting!; const { snapshot } = await this.controller.newMeeting(String((body as { title?: unknown }).title ?? "").slice(0, 200), { workspaceId: meeting.workspaceId, chatSessionId: meeting.chatSessionId }); response.end(JSON.stringify({ ok: true, url: await this.open(snapshot.meeting!.id) })); return; }
           if (body.action === "switch") { const id = String((body as { id?: unknown }).id ?? ""); await this.controller.switchTo(id); response.end(JSON.stringify({ ok: true, url: await this.open(id) })); return; }
           // Minutes can be written for any meeting this page shows, including past ones.
           if (body.action === "minutes") {

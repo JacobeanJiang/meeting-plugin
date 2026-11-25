@@ -5,8 +5,9 @@ import { constants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { REWRITE_BATCH, acceptRewrite, rewriteSegments } from "./rewrite";
-import { asrChoicesFor, type AiTask, BOARD_FORMS, DEFAULT_SETTINGS, SCENARIO_LIMIT, SCENARIO_TEXT_LIMIT, type Scenario, DEFAULT_TOPIC, FORM_LABEL, markdown, type BoardForm, type BoardSpace, type Settings, type Meeting, type Snapshot, type Environment, type Segment } from "../shared";
+import { asrChoicesFor, type AiTask, BOARD_FORMS, DEFAULT_SETTINGS, SCENARIO_LIMIT, SCENARIO_TEXT_LIMIT, type Scenario, DEFAULT_TOPIC, FORM_LABEL, markdown, type BoardForm, type BoardSpace, type Settings, type Meeting, type Snapshot, type Environment, type Segment, type VoiceUtterance, type SpeakerChange, type LiveCaption } from "../shared";
 import { RETRY_PROMPT, VAD, asrConfig, asrPrompt, polishTranscript, stripPromptEcho, vocabularyTerms } from "./asr";
+import { LivePreview } from "./live-preview";
 import * as OpenCC from "opencc-js";
 import { ModelStore, WINDOWS_DEFAULTS, type SetupState } from "./models";
 import { DEFAULT_ASSISTANT, detectTasks, mentionsAssistant, quickTasks, taskMessage, type Assistant } from "./tasks";
@@ -22,8 +23,21 @@ export const REDRAW_WINDOW = 12;
 /** Minutes need real discussion: a few stray words (or noise read as words) would be dressed up as a made-up meeting. */
 export const MINUTES_MIN_CHARS = 60;
 export const MUST_DECIDE_AFTER_MS = 300000;
+const WINDOWS_MICROPHONE = "无法打开麦克风：请在 Windows 设置 › 隐私和安全性 › 麦克风 中打开“麦克风访问权限”和“允许桌面应用访问麦克风”，确认已连接麦克风且没有被其他会议软件独占，然后重新开始会议";
+const MICROPHONE_SILENT = "麦克风已超过 10 秒没有声音输入，可能是切换了麦克风或被其他应用占用；请检查系统声音设置，必要时结束会议后重新开始";
 
 
+type LiveVoice = {
+  readonly active: boolean;
+  push(pcm: Buffer): void;
+  pause(): void;
+  resume(): void;
+  finish(): Promise<void>;
+  abort(): void;
+  transcribeChunk(startMs: number, endMs: number): Promise<VoiceUtterance[] | null>;
+  live(): LiveCaption;
+  release(endMs: number): void;
+};
 type Stored = Meeting & { asrModel: string; audioFiles: Record<string, string>; sessionDir: string };
 export type Recorder = { write: (command: string) => void; kill: () => void };
 export type Deps = {
@@ -55,7 +69,11 @@ export type Deps = {
   organiseTimeoutMs?: number;
   /** Longest wait for one caption proofreading request (default 20 s, within the desktop host's limit per model call). */
   rewriteTimeoutMs?: number;
-  /** Cloud speech recognition supplied by the desktop host; absent means this computer recognises everything. */
+  /** Streaming voice recognition available in the desktop test environment. */
+  openVoiceStream?: (onSpeaker: (change: SpeakerChange) => void, onLive: () => void) => LiveVoice;
+  /** Without a streaming service: draft captions re-recognised from the audio not yet saved, a pass every this many ms. */
+  livePreviewEveryMs?: number;
+  /** Optional recognizer for saved WAV chunks, used before local recognition. */
   cloudTranscribe?: (input: { file: string; language: string; hotwords: string[]; context: string }) => Promise<{ text: string; model: string }>;
   /** Chinese script conversion; defaults to the bundled recorder in text mode. */
   convert?: (text: string, to: "Hans" | "Hant") => Promise<string>;
@@ -145,6 +163,11 @@ export class MeetingController {
   private current: Stored | null = null;
   private records = new Map<string, Stored>();
   private recorder: Recorder | null = null;
+  private voice: { id: string; stream: LiveVoice } | null = null;
+  /** Chunks the recorder found quiet while streaming: only for these is an empty stream result taken as silence. */
+  private quietChunks = new Set<string>();
+  /** Live captions change several times a second; listeners hear about them at most once a second. */
+  private liveTimer: ReturnType<typeof setTimeout> | null = null;
   private queue: Promise<unknown> = Promise.resolve();
   private saves: Promise<unknown> = Promise.resolve();
   private processing = false;
@@ -155,6 +178,9 @@ export class MeetingController {
   private level: number | null = null;
   private recorderReady = false;
   private startTimeout: ReturnType<typeof setTimeout> | null = null;
+  /** When the recorder last delivered audio; the level meter arrives five times a second while the microphone works. */
+  private heardAt = 0;
+  private silenceWatch: ReturnType<typeof setInterval> | null = null;
   private transcriptionChildren = new Set<ChildProcess>();
   private tick: ReturnType<typeof setInterval> | null = null;
   private configFile = "";
@@ -266,7 +292,18 @@ export class MeetingController {
   private publicMeeting(record: Stored): Meeting { const { audioFiles: _files, sessionDir: _dir, asrModel: _model, ...value } = record; return value; }
   snapshot(record: Stored | null = this.current): Snapshot {
     const meeting = record ? this.publicMeeting(record) : null;
-    return structuredClone({ settings: this.settings, meeting, levelDbfs: this.level, pending: record?.segments.filter(segment => ["pending", "transcribing"].includes(segment.status)).length ?? 0, history: [...this.records.values()].sort((a, b) => b.startedAt - a.startedAt).map(({ id, title, startedAt, phase, plan }) => ({ id, title, startedAt, phase, theme: plan?.theme ?? "" })), setup: this.models.state as SetupState });
+    const live = record && this.voice?.id === record.id ? this.voice.stream.live() : null;
+    // A sentence belongs to the chunk it starts in; once that chunk's caption is saved, the caption shows it instead.
+    if (live && record) {
+      const saved = record.segments.filter(segment => segment.status !== "pending" && segment.status !== "transcribing");
+      live.sentences = live.sentences.filter(sentence => !saved.some(segment => sentence.startMs >= segment.startMs && sentence.startMs < segment.endMs));
+    }
+    return structuredClone({ settings: this.settings, meeting, levelDbfs: this.level, pending: record?.segments.filter(segment => ["pending", "transcribing"].includes(segment.status)).length ?? 0, history: [...this.records.values()].sort((a, b) => b.startedAt - a.startedAt).map(({ id, title, startedAt, phase, plan }) => ({ id, title, startedAt, phase, theme: plan?.theme ?? "" })), setup: this.models.state as SetupState, live });
+  }
+  meetingForConversation(workspaceId: string, sessionId: string): string | null {
+    return [...this.records.values()]
+      .filter(record => record.workspaceId === workspaceId && record.chatSessionId === sessionId)
+      .sort((a, b) => b.startedAt - a.startedAt)[0]?.id ?? null;
   }
   view(id: string): Snapshot {
     const record = this.records.get(id);
@@ -274,6 +311,10 @@ export class MeetingController {
     return this.snapshot(record);
   }
   private emit() { if (!this.disposed) this.deps.emit(this.snapshot()); }
+  private liveChanged() {
+    if (this.liveTimer || this.disposed) return;
+    this.liveTimer = setTimeout(() => { this.liveTimer = null; this.emit(); }, 1000);
+  }
   private persist(record = this.current): Promise<unknown> {
     if (!record) return Promise.resolve();
     const body = JSON.stringify(record);
@@ -301,9 +342,14 @@ export class MeetingController {
     const supported = ["darwin", "win32"].includes(this.platform);
     const binary = await this.binary();
     const setup = this.models.state as SetupState;
-    const base = { supported, binary, version: null, asrModels: [] as string[], defaultAsrModel: null as string | null, setup, asrChoices: asrChoicesFor(this.platform), cloudAsr: Boolean(this.deps.cloudTranscribe) };
+    const base = { supported, binary, version: null, asrModels: [] as string[], defaultAsrModel: null as string | null, setup, asrChoices: asrChoicesFor(this.platform), cloudAsr: Boolean(this.deps.cloudTranscribe || this.deps.openVoiceStream), ...(this.deps.openVoiceStream ? { voiceprintTest: true } : {}) };
     if (!supported) return { ...base, error: "目前只支持 macOS 和 Windows" };
-    if (!binary) return { ...base, error: this.windows ? "识别程序无法在这台电脑上运行，请重新安装会议助手" : "会议助手内置的识别程序缺失，请重新安装会议助手" };
+    if (!binary) {
+      // The cross-platform package fetches the Mac recogniser after install; cloud recognition works meanwhile.
+      const cloud = this.settings.asrEngine === "cloud" && Boolean(this.deps.cloudTranscribe || this.deps.openVoiceStream);
+      if (!this.windows && cloud) return { ...base, error: null };
+      return { ...base, error: this.windows ? "识别程序无法在这台电脑上运行，请重新安装会议助手" : "本机识别程序还在下载，请稍后再试，或在设置里改用云端识别" };
+    }
     let version: string;
     try { version = this.windows ? this.whisper!.version : (await this.run(binary, ["--version"])).trim().slice(0, 200); }
     catch { return { ...base, error: "识别程序无法运行，请重新安装会议助手" }; }
@@ -365,7 +411,7 @@ export class MeetingController {
       // Organising an earlier meeting must never block a new one: its late result is simply dropped.
       if (this.summarizing && this.current) { this.summaryToken++; this.current.summaryState = "idle"; await this.persist(this.current); }
       const env = await this.check();
-      if (env.error || !env.binary) throw Error(env.error ?? "环境未就绪");
+      if (env.error) throw Error(env.error);
       if (!this.deps.record && !this.windows) await chmod(this.deps.recorderPath, 0o700);
       const id = randomUUID();
       const sessionDir = path.join(this.deps.data, "audio", id);
@@ -374,57 +420,120 @@ export class MeetingController {
       const model = await this.models.preferred(this.settings.asrModel);
       this.configFor = ""; // written once the model is on disk, see drain()
       if (this.models.state.status === "failed") this.prepare();
-      this.current = { id, title: title.trim().slice(0, 200) || "会议 " + new Date().toLocaleString(), startedAt: Date.now(), endedAt: null, phase: "starting", segments: [], notes: [], summaryThrough: -1, summaryAt: null, summaryState: "idle", summaryError: null, error: null, plan: null, items: [], links: [], summaries: [], lastChange: null, requestedForm: null, chapters: null, nextMeetingId: null, aiTasks: [], aiSessionId: null, chatSessionId: origin?.chatSessionId ?? null, minutes: null, preps: null, redraw: null, workspaceId: origin?.workspaceId ?? null, audioFiles: {}, sessionDir, asrModel: model };
+      this.current = { id, title: title.trim().slice(0, 200) || "会议 " + new Date().toLocaleString(), startedAt: Date.now(), endedAt: null, phase: "starting", segments: [], notes: [], summaryThrough: -1, summaryAt: null, summaryState: "idle", summaryError: null, error: null, plan: null, items: [], links: [], summaries: [], lastChange: null, requestedForm: null, chapters: null, nextMeetingId: null, aiTasks: [], aiSessionId: null, chatSessionId: origin?.chatSessionId ?? null, minutes: null, preps: null, todoDone: [], redraw: null, workspaceId: origin?.workspaceId ?? null, audioFiles: {}, sessionDir, asrModel: model };
       this.records.set(id, this.current); this.level = null; this.recorderReady = false;
       await this.persist(); this.emit();
       this.startTimeout = setTimeout(() => {
         void this.exclusive(async () => {
           if (this.current?.id !== id || this.recorderReady) return;
           this.current.phase = "interrupted"; this.current.error = "麦克风启动超时，请检查系统麦克风授权后重试";
+          this.voice?.stream.abort(); this.voice = null;
           this.recorder?.kill(); this.recorder = null; await this.persist(); this.emit();
         }).catch(() => undefined);
       }, 60000);
       this.startTimeout.unref();
-      const event = (value: Record<string, unknown>) => { void this.exclusive(() => this.onRecorder(id, value)).catch(() => { if(this.current?.id===id){this.current.error="录音数据保存失败，请停止录音并及时导出";this.emit();} }); };
+      this.voice?.stream.abort();
+      this.voice = null;
+      const record = this.current;
+      const streamVoice = !this.deps.record && this.settings.asrEngine === "cloud" ? this.deps.openVoiceStream : undefined;
+      const previewEveryMs = this.deps.livePreviewEveryMs;
+      const openVoice = streamVoice ?? (previewEveryMs ? (_speaker: (change: SpeakerChange) => void, onLive: () => void): LiveVoice => new LivePreview({
+        recognise: file => this.recogniseDraft(record, file), file: path.join(sessionDir, "live-preview.wav"), everyMs: previewEveryMs,
+        // Saved chunks go first. On Windows the local recogniser runs on the processor, so drafts also wait while a chunk is recognised.
+        busy: () => record.segments.some(segment => segment.status === "pending" || (this.windows && !this.useCloud() && segment.status === "transcribing")), onLive,
+      }) : undefined);
+      let voiceStarted = false;
+      const event = (value: Record<string, unknown>) => {
+        if (value.event === "pcm") {
+          if (this.disposed || this.current?.id !== id || typeof value.hex !== "string" || !/^(?:[a-f0-9]{4}){1,3200}$/.test(value.hex)) return;
+          if (openVoice && !voiceStarted) {
+            voiceStarted = true;
+            try {
+              this.voice = { id, stream: openVoice(change => {
+                if (this.disposed || this.voice?.id !== id) return;
+                const changes = record.speakerChanges ??= [];
+                if (changes.at(-1)?.name !== change.name) changes.push(change);
+              }, () => { if (this.voice?.id === id) this.liveChanged(); }) };
+            } catch { /* Continue with the saved chunks. */ }
+          }
+          this.voice?.stream.push(Buffer.from(value.hex, "hex"));
+          return;
+        }
+        void this.exclusive(() => this.onRecorder(id, value)).catch(() => {
+          if (this.current?.id === id) { this.current.error = "录音数据保存失败，请停止录音并及时导出"; this.emit(); }
+        });
+      };
       const ended = (code: number | null) => { void this.exclusive(async () => {
         if (this.current?.id !== id || this.disposed) return;
         this.recorder = null;
-        if (this.current.phase !== "stopping" && this.current.phase !== "complete") { this.current.phase = "interrupted"; this.current.error = code === 0 ? "录音意外结束，已有转写已保留" : this.windows ? "麦克风录音失败：请在 Windows 设置 › 隐私和安全性 › 麦克风 中打开“允许桌面应用访问麦克风”，并确认已连接麦克风" : "麦克风录音失败，请检查系统麦克风权限或设备"; }
+        if (this.voice?.id === id) void this.voice.stream.finish();
+        if (this.current.phase !== "stopping" && this.current.phase !== "complete") { this.current.phase = "interrupted"; this.current.error = code === 0 ? "录音意外结束，已有转写已保留" : this.windows ? WINDOWS_MICROPHONE : "麦克风录音失败，请检查系统麦克风权限或设备"; }
         await this.maybeFinish(); this.emit(); await this.persist();
       }).catch(() => undefined); };
-      try { this.recorder = this.deps.record ? this.deps.record(sessionDir, this.settings.chunkSecs, event, ended) : this.spawnRecorder(sessionDir, event, ended); }
+      try { this.recorder = this.deps.record ? this.deps.record(sessionDir, this.settings.chunkSecs, event, ended) : this.spawnRecorder(sessionDir, event, ended, Boolean(openVoice)); }
       catch { this.current.phase = "interrupted"; this.current.error = "录音组件启动失败"; await this.persist(); this.emit(); }
       return this.snapshot();
     });
   }
-  private spawnRecorder(dir: string, event: (message: Record<string, unknown>) => void, ended: (code: number | null) => void): Recorder {
-    const child = spawn(this.deps.recorderPath, [dir, String(this.settings.chunkSecs)], { stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
+  private spawnRecorder(dir: string, event: (message: Record<string, unknown>) => void, ended: (code: number | null) => void, streamPCM: boolean): Recorder {
+    const child = spawn(this.deps.recorderPath, [dir, String(this.settings.chunkSecs), ...(streamPCM ? ["--stream-pcm"] : [])], { stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
     let buffer = "";
     child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => { buffer = (buffer + chunk).slice(-16384); const lines = buffer.split("\n"); buffer = lines.pop() ?? ""; for (const line of lines) { try { event(JSON.parse(line)); } catch { /* malformed diagnostics */ } } });
+    child.stdout.on("data", (chunk: string) => { const lines = (buffer + chunk).split("\n"); buffer = (lines.pop() ?? "").slice(-16384); for (const line of lines) { try { event(JSON.parse(line)); } catch { /* malformed diagnostics */ } } });
     child.stdin.on("error", () => undefined);
-    child.on("error", () => ended(1)); child.on("exit", ended);
+    child.on("close", ended); child.on("error", () => undefined);
     return { write: command => child.stdin.write(command + "\n"), kill: () => { child.stdin.end(); child.kill("SIGTERM"); } };
   }
   private async onRecorder(id: string, value: Record<string, unknown>): Promise<void> {
     const record = this.current;
     if (this.disposed || record?.id !== id) return;
-    if (value.event === "level") { this.level = typeof value.db === "number" && Number.isFinite(value.db) ? Math.max(-120, Math.min(0, value.db)) : null; this.emit(); return; }
-    if (value.event === "ready") { this.recorderReady = true; if (this.startTimeout) clearTimeout(this.startTimeout); this.startTimeout = null; if (record.phase === "starting") record.phase = "recording"; }
-    else if (value.event === "paused" && record.phase !== "stopping") record.phase = "paused";
-    else if (value.event === "resumed" && record.phase !== "stopping") record.phase = "recording";
-    else if (value.event === "error") { record.error = "麦克风录音或音频保存失败，请结束会议并检查权限、设备和磁盘空间"; record.phase = "stopping"; this.recorder?.write("stop"); }
+    if (value.event === "level") {
+      this.heardAt = Date.now();
+      if (record.error === MICROPHONE_SILENT) record.error = null;
+      this.level = typeof value.db === "number" && Number.isFinite(value.db) ? Math.max(-120, Math.min(0, value.db)) : null; this.emit(); return;
+    }
+    if (value.event === "ready") {
+      this.recorderReady = true; if (this.startTimeout) clearTimeout(this.startTimeout); this.startTimeout = null; if (record.phase === "starting") record.phase = "recording";
+      // A recording that stops receiving audio (the microphone was switched or taken away) should say so instead of going quiet.
+      this.heardAt = Date.now();
+      if (this.silenceWatch) clearInterval(this.silenceWatch);
+      this.silenceWatch = setInterval(() => {
+        const now = this.current;
+        if (!now || now.id !== id || !["recording", "stopping"].includes(now.phase)) { if (!now || now.id !== id || !this.isActive()) { clearInterval(this.silenceWatch!); this.silenceWatch = null; } return; }
+        if (now.phase === "recording" && Date.now() - this.heardAt > 10000 && now.error !== MICROPHONE_SILENT) { now.error = MICROPHONE_SILENT; this.emit(); }
+      }, 2000);
+      this.silenceWatch.unref();
+    }
+    else if (value.event === "paused" && record.phase !== "stopping") { this.voice?.stream.pause(); record.phase = "paused"; }
+    else if (value.event === "resumed" && record.phase !== "stopping") { this.voice?.stream.resume(); record.phase = "recording"; }
+    else if (value.event === "error") {
+      // The recorder names what failed; each cause gets its own advice instead of one message for all of them.
+      const code = typeof value.message === "string" ? value.message.slice(0, 64) : "unknown";
+      const reasons: Record<string, string> = {
+        microphone_permission_denied: this.windows ? WINDOWS_MICROPHONE : "无法打开麦克风：请在 系统设置 › 隐私与安全性 › 麦克风 中允许AI 助手，然后重新开始会议",
+        microphone_permission_or_device: this.windows ? WINDOWS_MICROPHONE : "无法打开麦克风：请在 系统设置 › 隐私与安全性 › 麦克风 中允许AI 助手，并确认已连接麦克风，然后重新开始会议",
+        microphone_unavailable: "没有找到可用的麦克风，请连接麦克风后重新开始会议",
+        microphone_lost: "麦克风已断开且无法重新连接，请检查麦克风后重新开始会议；已录内容已保留",
+        audio_write_failed: "录音文件保存失败，请检查磁盘空间后重新开始会议；已录内容已保留",
+        audio_conversion_failed: "麦克风音频格式无法转换，请在系统声音设置中换一个麦克风后重新开始会议",
+      };
+      record.error = reasons[code] ?? "麦克风录音失败（" + code + "），请结束会议并检查麦克风权限和设备";
+      this.deps.log("recorder_failed", { reason: code, platform: this.platform, recorded: this.recorderReady, success: false });
+      record.phase = "stopping"; this.recorder?.write("stop");
+    }
     else if (value.event === "chunk") {
       if (typeof value.name !== "string" || !/^\d{6}\.wav$/.test(value.name) || !Number.isSafeInteger(value.seq) || Number(value.seq) < 0
         || !Number.isFinite(value.startMs) || !Number.isFinite(value.endMs) || Number(value.endMs) <= Number(value.startMs)) return;
       if (record.segments.length >= 700) { this.recorder?.write("stop"); record.phase = "stopping"; record.error = "本次会议已达到初版分段上限，请处理完成后开启下一场"; return; }
       const seq = Number(value.seq); if (record.segments.some(segment => segment.seq === seq)) return;
-      const silent = Number(value.endMs) - Number(value.startMs) < 500 || typeof value.rms === "number" && value.rms < 0.003 || typeof value.voicedMs === "number" && value.voicedMs < 100;
+      const quiet = Number(value.endMs) - Number(value.startMs) < 500 || typeof value.rms === "number" && value.rms < 0.003 || typeof value.voicedMs === "number" && value.voicedMs < 100;
+      const silent = !this.voice?.stream.active && quiet;
       const segment: Segment = { id: "s" + seq, seq, startMs: Number(value.startMs), endMs: Number(value.endMs), status: silent ? "empty" : "pending", text: "", error: null, tag: null, raw: null, rewrite: null };
+      if (quiet && !silent) this.quietChunks.add(record.id + ":" + segment.id);
       record.segments.push(segment); record.segments.sort((a, b) => a.seq - b.seq);
       const file = path.join(record.sessionDir, value.name);
       if (silent) await rm(file, { force: true }); else record.audioFiles[segment.id] = file;
-      if (this.models.state.status === "ready" && record.segments.filter(s => s.status === "pending").length > 40) { this.recorder?.write("pause"); record.error = "转写积压较多，已请求暂停录音；请等待处理后继续"; }
+      if (!this.voice?.stream.active && this.models.state.status === "ready" && record.segments.filter(s => s.status === "pending").length > 40) { this.recorder?.write("pause"); record.error = "转写积压较多，已请求暂停录音；请等待处理后继续"; }
       await this.persist();
       void this.drain().catch(() => { record.error="转写队列保存失败，请检查磁盘空间";this.emit(); });
     } else if (value.event === "stopped") { this.level = null; }
@@ -472,7 +581,7 @@ export class MeetingController {
   private async drain(): Promise<void> {
     if (this.processing || this.disposed || !this.current) return;
     // While the model is still being prepared, audio waits on disk instead of failing segment by segment.
-    if (this.models.state.status !== "ready" && !this.useCloud()) {
+    if (this.models.state.status !== "ready" && !this.useCloud() && !this.voice?.stream.active) {
       if (this.models.state.status === "failed") return;
       try { if (this.windows) await this.models.ensure(this.current.asrModel); else await this.writeConfig(this.current); } catch { this.emit(); return; }
     }
@@ -486,26 +595,20 @@ export class MeetingController {
           const file = record.audioFiles[segment.id]; if (!file) throw Error("未找到待转写音频");
           let raw: string | null = null;
           // The cloud recogniser first; any failure falls back to this computer so a segment is never lost to the network.
-          if (this.useCloud()) raw = await this.cloudSegment(record, segment, file);
+          const streaming = this.voice?.id === record.id ? this.voice.stream : null;
+          const utterances = await streaming?.transcribeChunk(segment.startMs, segment.endMs);
+          // The stream can miss speech it never wrote down; an empty result counts only where the recorder heard nothing either.
+          const quietChunk = this.quietChunks.delete(record.id + ":" + segment.id);
+          if (utterances && (utterances.length > 0 || quietChunk)) {
+            segment.utterances = utterances;
+            raw = utterances.map(row => row.text).join("\n");
+          } else if (this.useCloud()) raw = await this.cloudSegment(record, segment.seq, file);
           const cloud = raw !== null;
           if (cloud) { /* recognised in the cloud */ }
-          else if (this.windows) { const binary = await this.binary(); if (!binary) throw Error("未找到识别程序"); raw = await this.transcribeWindows(binary, record, file); }
-          else {
-          const binary = await this.binary(); if (!binary) throw Error("未找到 voxtype");
-          await this.writeConfig(record);
-          let output: string;
-          try { output = await this.run(binary, ["--config", this.configFile, "transcribe", file]); }
-          catch (error) {
-            if (!(error instanceof Error) || error.message !== INVALID_UTF8) throw error;
-            const retry = this.configFile.replace(/\.toml$/, ".retry.toml");
-            await writeFile(retry, asrConfig(await this.models.ensure(record.asrModel), this.settings, await this.models.vad(), this.settings.language === "zh" || this.settings.language === "auto" ? RETRY_PROMPT : null), { mode: 0o600 });
-            output = await this.run(binary, ["--config", retry, "transcribe", file]);
-          }
-          raw = parseTranscript(output);
-          }
+          else raw = await this.transcribeLocal(record, file);
           // A quiet chunk can come back as the recognition prompt itself; that is not speech.
           if (raw) raw = stripPromptEcho(raw, this.echoPrompts());
-          const polished = raw ? await polishTranscript(raw, this.settings, this.deps.convert ?? (this.windows ? convertOpenCC : convertWith(this.deps.recorderPath))) : "";
+          const polished = raw ? await polishTranscript(raw, this.settings, this.converter()) : "";
           const text = isNoiseTranscript(polished) ? "" : polished;
           if (this.disposed) break;
           if (text.length > 35000) throw Error("转写过长，保留原音频供重试");
@@ -524,16 +627,46 @@ export class MeetingController {
           const scenarioDue = this.activeScenarios().length > 0 && Date.now() - (this.scenarioCheckedAt.get(record.id) ?? 0) >= Math.max(SCENARIO_EVERY_MS, this.deps.organiseEveryMs ?? 0);
           if (text && this.settings.aiTasks && (named || scenarioDue)) void this.findTasks(record).catch(() => undefined);
         } catch { segment.status = "failed"; segment.error = "此段转写失败，音频已保留，可重试"; this.deps.log("segment_failed", { success: false }); }
-        await this.persist(record); this.emit();
+        await this.persist(record);
+        // The chunk's caption is saved, so its live sentences give way to it.
+        if (this.voice?.id === record.id) this.voice.stream.release(segment.endMs);
+        this.emit();
       }
     } finally { this.processing = false; await this.maybeFinish(); this.emit(); }
   }
   private useCloud(): boolean { return this.settings.asrEngine === "cloud" && Boolean(this.deps.cloudTranscribe); }
+  private converter(): (text: string, to: "Hans" | "Hant") => Promise<string> { return this.deps.convert ?? (this.windows ? convertOpenCC : convertWith(this.deps.recorderPath)); }
+  /** One WAV file through the recogniser on this computer: whisper-cli on Windows, voxtype on macOS. */
+  private async transcribeLocal(record: Stored, file: string): Promise<string> {
+    if (this.windows) { const binary = await this.binary(); if (!binary) throw Error("未找到识别程序"); return this.transcribeWindows(binary, record, file); }
+    const binary = await this.binary(); if (!binary) throw Error("未找到 voxtype");
+    await this.writeConfig(record);
+    let output: string;
+    try { output = await this.run(binary, ["--config", this.configFile, "transcribe", file]); }
+    catch (error) {
+      if (!(error instanceof Error) || error.message !== INVALID_UTF8) throw error;
+      const retry = this.configFile.replace(/\.toml$/, ".retry.toml");
+      await writeFile(retry, asrConfig(await this.models.ensure(record.asrModel), this.settings, await this.models.vad(), this.settings.language === "zh" || this.settings.language === "auto" ? RETRY_PROMPT : null), { mode: 0o600 });
+      output = await this.run(binary, ["--config", retry, "transcribe", file]);
+    }
+    return parseTranscript(output);
+  }
+  /** Draft text for live captions, recognised and cleaned like a saved caption; empty while the local model is still being prepared. */
+  private async recogniseDraft(record: Stored, file: string): Promise<string> {
+    let raw = this.useCloud() ? await this.cloudSegment(record, Number.MAX_SAFE_INTEGER, file) : null;
+    if (raw === null) {
+      if (this.models.state.status !== "ready") return "";
+      raw = await this.transcribeLocal(record, file);
+    }
+    raw = stripPromptEcho(raw, this.echoPrompts());
+    const polished = raw ? await polishTranscript(raw, this.settings, this.converter()) : "";
+    return isNoiseTranscript(polished) ? "" : polished;
+  }
   /** The prompts the local recogniser may echo: the one with the meeting's terms, and the plain one used for a retry. */
   private echoPrompts(): string[] { return [asrPrompt(this.settings, this.assistant.name), RETRY_PROMPT]; }
-  /** One segment through the cloud recogniser, with the meeting's terms and the previous segment as context; null when it failed. */
-  private async cloudSegment(record: Stored, segment: Segment, file: string): Promise<string | null> {
-    const before = record.segments.filter(s => s.status === "done" && s.seq < segment.seq && s.text).slice(-2).map(s => s.text).join("");
+  /** One recording through the cloud recogniser, with the meeting's terms and the captions before it (by seq) as context; null when it failed. */
+  private async cloudSegment(record: Stored, seq: number, file: string): Promise<string | null> {
+    const before = record.segments.filter(s => s.status === "done" && s.seq < seq && s.text).slice(-2).map(s => s.text).join("");
     const hotwords = vocabularyTerms(this.settings.vocabulary);
     if (this.settings.aiTasks !== false) hotwords.unshift(this.assistant.name);
     try {
@@ -550,6 +683,10 @@ export class MeetingController {
   private async maybeFinish(): Promise<void> {
     if (!this.current || this.disposed) return;
     if (this.current.phase === "stopping" && !this.recorder && !this.current.segments.some(s => ["pending", "transcribing"].includes(s.status))) {
+      const meeting = this.current;
+      if (this.voice?.id === meeting.id) await this.voice.stream.finish();
+      if (this.disposed || this.current !== meeting || meeting.phase !== "stopping") return;
+      this.voice = null;
       this.current.phase = "complete"; this.current.endedAt = Date.now(); await this.persist();
       if (this.settings.autoSummary) { void this.doSummary(false).catch(() => undefined); try { this.requestMinutes(this.current.id); } catch { /* nothing transcribed */ } }
     }
@@ -1003,5 +1140,5 @@ export class MeetingController {
     const file = path.join(directory, record.id + ".md"); await writeFile(file, text, { mode: 0o600 });
     return { path: file, text };
   }
-  dispose(): void { if (this.startTimeout) clearTimeout(this.startTimeout); for (const child of this.transcriptionChildren) child.kill("SIGTERM"); this.disposed = true; this.summaryToken++; if (this.tick) clearInterval(this.tick); this.recorder?.kill(); this.recorder = null; }
+  dispose(): void { this.voice?.stream.abort(); this.voice = null; if (this.silenceWatch) clearInterval(this.silenceWatch); if (this.liveTimer) clearTimeout(this.liveTimer); if (this.startTimeout) clearTimeout(this.startTimeout); for (const child of this.transcriptionChildren) child.kill("SIGTERM"); this.disposed = true; this.summaryToken++; if (this.tick) clearInterval(this.tick); this.recorder?.kill(); this.recorder = null; }
 }

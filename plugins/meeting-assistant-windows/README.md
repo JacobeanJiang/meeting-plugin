@@ -9,7 +9,8 @@
 
 ## 能做什么
 
-- **本地实时转写**：麦克风录音按 10–30 秒分段，用 whisper.cpp 在本机识别（默认 large-v3-turbo 量化模型），音频不出本机。支持中文、英文、日语、韩语及自动检测；中文可统一为简体或繁体，可添加专有名词提升识别准确率，并自动过滤静音、识别噪音和重复句。也可以配置一个云端语音识别接口（OpenAI 兼容的 `/audio/transcriptions`，例如 OpenAI、Groq、硅基流动或自建服务），识别更准，某段失败时自动改用本机识别；不配置时音频不出本机。
+- **本地实时转写**：麦克风录音按 10–30 秒分段，用 whisper.cpp 在本机识别（默认 large-v3-turbo 量化模型），音频不出本机。
+- **流式字幕**：边说边出字。正在说的话每隔一两秒重新识别一次，以灰色草稿显示在会议页（Apple M4 实测说话后约 5–8 秒出现，每 5 秒左右更新），所在分段识别完成后替换为正式字幕。Agent 读取会议时也能拿到这段草稿（`liveCaption`）。默认开启，设 `MEETING_LIVE_CAPTIONS=0` 可关闭。支持中文、英文、日语、韩语及自动检测；中文可统一为简体或繁体，可添加专有名词提升识别准确率，并自动过滤静音、识别噪音和重复句。也可以改用自己配置的第三方识别模型（任何 OpenAI 兼容的 `/audio/transcriptions` 接口，例如 OpenAI、Groq、硅基流动或自建的 whisper 服务，见下方“使用第三方语音识别模型”），流式字幕和正式字幕都会走这个接口，某段失败时自动改用本机识别；不配置时音频不出本机。
 - **AI 校对字幕**：每段字幕识别后，由整理用的同一个模型结合上下文和专有名词改同音错字、补标点、去口头禅，原文保留、可随时切换查看；校对结果长短变化太大时不采用。默认开启，可在会议页设置中关闭，或从当前平台读取到的模型列表中另选一个（Codex、Cursor 从命令行读取，Claude Code 提供 sonnet、opus、haiku，模型接口读取 /models）。
 - **会议实时页面**：开会后打开一个本地页面（Codex 桌面版会放在右侧内置浏览器里），左侧是白板，右侧是实时字幕，顶部显示录音状态、时长和音量；可以暂停、继续、结束，也可以切换查看历史会议。页面在窄窗口里会收成一行工具栏，字幕改为按需展开，白板也会改用更窄的排版、每个议题最多显示 5 条，让侧栏里也能看清。
 - **自动整理的白板**：先听一会儿，判断出会议主题后再开始绘制，按讨论推进逐步追加，不会推翻已有内容。默认画成思维导图，支持五种形式：
@@ -38,7 +39,7 @@ flowchart LR
   Server --- Page
 ```
 
-- **转写**默认完全在本机完成；配置了 `MEETING_ASR_MODEL` 时，每段录音先发给所配置的语音识别接口，失败时这一段改用本机识别。可在会议页设置里切回“本机识别”。
+- **转写**默认完全在本机完成；配置了 `MEETING_ASR_MODEL` 时，每段录音和流式字幕草稿都发给所配置的语音识别接口，失败时这一段改用本机识别。可在会议页设置里切回“本机识别”。
 - **实时白板整理**和**服务端生成纪要**默认直接用你电脑上的 Agent 命令行完成（Codex 用 `codex exec`，只读、低推理强度；也支持 Claude Code、Cursor），不需要 API Key，用的是你自己的 Agent 账号额度，大约每 90 秒整理一次。也可以配置一个 OpenAI 兼容的模型接口（OpenAI、DeepSeek、通义千问、OpenRouter、本地 Ollama 等），配置后改用这个接口，整理更快（约 40 秒一次）。转写文字只发送给其中一方。
 - **既没有模型接口也没有 Agent 命令行**时：录音、字幕、会中问答照常，白板不会自动整理；纪要由你正在使用的 Agent 按同一份规范直接写出，再保存回会议。
 - **会中 AI 执行**同样由本机的 Agent 命令行完成：Codex 用 `codex exec`，Claude Code 用 `claude -p`，Cursor 用 `cursor-agent -p`。默认按 Codex、Claude Code、Cursor 的顺序使用第一个已安装的；都没有安装时这一功能自动关闭，会议页面的“AI 执行”栏会说明原因。
@@ -160,6 +161,9 @@ mkdir -p ~/.claude/skills && cp -R <dir>/skills/meeting-assistant ~/.claude/skil
 | `MEETING_ASR_MODEL` | 云端语音识别模型，例如 `whisper-1`、`gpt-4o-mini-transcribe`、`whisper-large-v3`。不设置时只用本机识别，音频不上传 | — |
 | `MEETING_ASR_BASE_URL` | 语音识别接口地址（OpenAI 兼容，调用 `<地址>/audio/transcriptions`），必须是 https（本机地址除外） | 同 `MEETING_LLM_BASE_URL` |
 | `MEETING_ASR_API_KEY` | 语音识别接口的 API Key | 同 `MEETING_LLM_API_KEY` |
+| `MEETING_ASR_TIMEOUT_MS` | 单次语音识别请求的超时时间（毫秒） | `60000` |
+| `MEETING_LIVE_CAPTIONS` | 设为 `0` 关闭流式字幕，只在每段识别完成后显示字幕 | 开启 |
+| `MEETING_LIVE_INTERVAL_MS` | 流式字幕两次识别之间的间隔（毫秒，500–10000）。使用按次计费的第三方接口时可调大以减少调用 | `1500` |
 | `MEETING_TASK_RUNNER` | 会中 AI 执行（以及未配置模型接口时的白板整理、纪要）使用的 Agent：`auto`、`codex`、`claude`、`cursor`，或 `off` 关闭 | `auto` |
 | `MEETING_ASSISTANT_NAME` | 会上点名助手用的称呼，也会作为专有名词提示给语音识别 | `AI助手` |
 | `MEETING_WAKE_WORDS` | 其他也算点名的叫法，逗号分隔，例如 `小助,Codex` | — |
@@ -168,7 +172,30 @@ mkdir -p ~/.claude/skills && cp -R <dir>/skills/meeting-assistant ~/.claude/skil
 | `MEETING_ASSISTANT_HOME` | 会议记录、白板与模型的存放目录 | `~/.meeting-assistant` |
 | `MEETING_OPEN_BROWSER` | 设为 `0` 时不自动打开浏览器，只返回页面地址 | `1` |
 
+以上设置也可以写在 `~/.meeting-assistant/config.json`（或 `MEETING_ASSISTANT_HOME` 下的 config.json）里，键名与环境变量相同。Codex 桌面版等应用启动插件时通常读不到终端里设置的环境变量，推荐用这个文件。同一项同时出现时，环境变量优先。修改后需要完全退出并重新打开 Agent 应用。
+
 识别模型、会议语言、简繁体、专有名词、静音过滤、分段时长、白板默认形式等，在会议页面右上角的设置中调整。
+
+### 使用第三方语音识别模型
+
+默认用本机的 whisper.cpp 识别，不需要任何配置。想换成其他识别模型时，新建 `~/.meeting-assistant/config.json`，填入接口地址、Key 和模型名：
+
+```json
+{
+  "MEETING_ASR_BASE_URL": "https://api.groq.com/openai/v1",
+  "MEETING_ASR_API_KEY": "gsk-...",
+  "MEETING_ASR_MODEL": "whisper-large-v3-turbo"
+}
+```
+
+| 服务 | `MEETING_ASR_BASE_URL` | `MEETING_ASR_MODEL` 示例 |
+|---|---|---|
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini-transcribe`、`whisper-1` |
+| Groq | `https://api.groq.com/openai/v1` | `whisper-large-v3-turbo` |
+| 硅基流动 | `https://api.siliconflow.cn/v1` | `FunAudioLLM/SenseVoiceSmall` |
+| 自建服务（如 faster-whisper-server、LocalAI） | `http://127.0.0.1:8000/v1` | 按服务说明 |
+
+要求是兼容 OpenAI 的 `POST <地址>/audio/transcriptions`（multipart 上传 WAV，返回 `{"text": "..."}`）。地址必须是 https，本机地址除外。保存后完全退出并重新打开 Agent 应用，再开始会议，`meeting_start` 返回的 `speechRecognition` 会显示正在使用的模型。开会中途想切回本机识别，在会议页右上角设置里选“本机识别”。流式字幕会按 `MEETING_LIVE_INTERVAL_MS` 的间隔多次调用接口，按次或按时长计费的服务可以把间隔调大，或设 `MEETING_LIVE_CAPTIONS=0` 关闭。
 
 ## MCP 工具
 
@@ -187,7 +214,7 @@ mkdir -p ~/.claude/skills && cp -R <dir>/skills/meeting-assistant ~/.claude/skil
 
 ## 隐私
 
-- 默认音频只在本机处理。配置了 `MEETING_ASR_MODEL` 时，每段录音会上传到 `MEETING_ASR_BASE_URL` 指定的语音识别服务，同时附带专有名词列表，不附带其他会议内容；在会议页设置里选“本机识别”即可停止上传。转写完成后删除分段音频；识别失败的片段会保留音频以便重试。
+- 默认音频只在本机处理。配置了 `MEETING_ASR_MODEL` 时，每段录音以及流式字幕正在识别的音频会上传到 `MEETING_ASR_BASE_URL` 指定的语音识别服务，同时附带专有名词列表，不附带其他会议内容；在会议页设置里选“本机识别”即可停止上传。转写完成后删除分段音频；识别失败的片段会保留音频以便重试。
 - 会议记录、白板和导出文件都保存在 `MEETING_ASSISTANT_HOME` 下。
 - 会议页面只监听 `127.0.0.1`，每场会议使用随机地址。
 - 转写文字只会交给负责整理的一方：配置了模型接口时发给该接口；否则交给本机的 Agent 命令行（只读运行、不执行命令），由它按自己的配置调用模型。两者都没有时不发送。

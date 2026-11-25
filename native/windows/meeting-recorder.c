@@ -2,7 +2,7 @@
  * Windows microphone recorder for the meeting plugin. Same protocol as the macOS MeetingRecorder:
  *   meeting-recorder.exe <output dir> <chunk seconds>
  * writes 000000.wav, 000001.wav ... (16 kHz mono 16-bit), prints one JSON event per line on stdout
- * (ready, level, chunk, paused, resumed, stopped, error) and reads pause/resume/stop lines on stdin.
+ * (ready, level, chunk, paused, resumed, stopped, device_changed, error) and reads pause/resume/stop lines on stdin.
  * Capture uses waveIn through the wave mapper, which converts any device format to 16 kHz mono.
  * "--simulate <file.wav> <speed>" feeds a WAV file instead of the microphone; tests use it on any OS.
  */
@@ -47,6 +47,24 @@ static char out_dir[4096];
 static int16_t *pending = NULL; static size_t pending_len = 0, pending_cap = 0, chunk_frames = 0;
 static long long sample_offset = 0; static int sequence = 0, paused = 0, finished = 0;
 static double last_level = 0;
+static int stream_pcm = 0;
+static int16_t stream_samples[3200];
+static size_t stream_count = 0;
+
+static void emit_pcm(void) {
+  if (!stream_count) return;
+  static const char digits[] = "0123456789abcdef";
+  char json[12864] = "{\"event\":\"pcm\",\"hex\":\"";
+  char *cursor = json + strlen(json);
+  for (size_t i = 0; i < stream_count; i++) {
+    uint16_t value = (uint16_t)stream_samples[i];
+    *cursor++ = digits[(value >> 4) & 15]; *cursor++ = digits[value & 15];
+    *cursor++ = digits[(value >> 12) & 15]; *cursor++ = digits[(value >> 8) & 15];
+  }
+  strcpy(cursor, "\"}");
+  emit(json);
+  stream_count = 0;
+}
 
 static int write_wav(const int16_t *data, size_t count, const char *name) {
   unsigned char head[44]; uint32_t bytes = (uint32_t)(count * 2);
@@ -96,6 +114,10 @@ static void consume(const int16_t *data, size_t count) {
   if (!paused && !finished && count) {
     if (pending_len + count > pending_cap) { pending_cap = (pending_len + count) * 2; pending = realloc(pending, pending_cap * 2); }
     memcpy(pending + pending_len, data, count * 2); pending_len += count;
+    if (stream_pcm) for (size_t i = 0; i < count; i++) {
+      stream_samples[stream_count++] = data[i];
+      if (stream_count == 3200) emit_pcm();
+    }
     if (now_ms() - last_level > 200) {
       int peak = 0; for (size_t i = 0; i < count; i++) { int a = abs((int)data[i]); if (a > peak) peak = a; }
       double db = 20 * log10(fmax(peak / 32767.0, 0.000001)); if (db < -120) db = -120;
@@ -138,28 +160,67 @@ static void *simulate_thread(void *unused) {
 
 #ifdef _WIN32
 #define BUFFERS 8
+#ifndef DRVM_MAPPER_PREFERRED_GET
+#define DRVM_MAPPER_PREFERRED_GET (DRV_RESERVED + 21)
+#endif
 static HWAVEIN device; static WAVEHDR headers[BUFFERS]; static int16_t buffers[BUFFERS][1600]; static HANDLE wake;
-static DWORD WINAPI capture_thread(LPVOID unused) {
-  (void)unused;
-  while (!stopping) {
-    WaitForSingleObject(wake, 200);
-    for (int i = 0; i < BUFFERS; i++) if (headers[i].dwFlags & WHDR_DONE) {
-      consume(buffers[i], headers[i].dwBytesRecorded / 2);
-      headers[i].dwFlags &= ~WHDR_DONE; headers[i].dwBytesRecorded = 0;
-      if (!stopping) waveInAddBuffer(device, &headers[i], sizeof(WAVEHDR));
-    }
-  }
-  return 0;
+static int device_open = 0; static DWORD opened_on = (DWORD)-1;
+/* Held while the device is opened, closed or reopened, so stopping never races a reconnect. */
+static CRITICAL_SECTION device_lock;
+/* The input the wave mapper uses now: the system default recording device. */
+static DWORD preferred_device(void) {
+  DWORD id = (DWORD)-1, flags = 0;
+  if (waveInMessage((HWAVEIN)(UINT_PTR)WAVE_MAPPER, DRVM_MAPPER_PREFERRED_GET, (DWORD_PTR)&id, (DWORD_PTR)&flags) != MMSYSERR_NOERROR) return (DWORD)-1;
+  return id;
+}
+static void close_microphone(void) {
+  if (!device_open) return;
+  waveInStop(device); waveInReset(device);
+  for (int i = 0; i < BUFFERS; i++) waveInUnprepareHeader(device, &headers[i], sizeof(WAVEHDR));
+  waveInClose(device); device_open = 0;
 }
 static int open_microphone(void) {
   WAVEFORMATEX format = { WAVE_FORMAT_PCM, 1, RATE, RATE * 2, 2, 16, 0 };
-  wake = CreateEventW(NULL, FALSE, FALSE, NULL);
+  if (!wake) wake = CreateEventW(NULL, FALSE, FALSE, NULL);
+  opened_on = preferred_device();
   if (waveInOpen(&device, WAVE_MAPPER, &format, (DWORD_PTR)wake, 0, CALLBACK_EVENT) != MMSYSERR_NOERROR) return 0;
+  device_open = 1;
   for (int i = 0; i < BUFFERS; i++) {
-    headers[i].lpData = (LPSTR)buffers[i]; headers[i].dwBufferLength = sizeof buffers[i]; headers[i].dwFlags = 0;
-    if (waveInPrepareHeader(device, &headers[i], sizeof(WAVEHDR)) != MMSYSERR_NOERROR || waveInAddBuffer(device, &headers[i], sizeof(WAVEHDR)) != MMSYSERR_NOERROR) return 0;
+    headers[i].lpData = (LPSTR)buffers[i]; headers[i].dwBufferLength = sizeof buffers[i]; headers[i].dwFlags = 0; headers[i].dwBytesRecorded = 0;
+    if (waveInPrepareHeader(device, &headers[i], sizeof(WAVEHDR)) != MMSYSERR_NOERROR || waveInAddBuffer(device, &headers[i], sizeof(WAVEHDR)) != MMSYSERR_NOERROR) { close_microphone(); return 0; }
   }
-  return waveInStart(device) == MMSYSERR_NOERROR;
+  if (waveInStart(device) != MMSYSERR_NOERROR) { close_microphone(); return 0; }
+  return 1;
+}
+/*
+ * The wave mapper keeps the device it opened. When the system default recording device changes (a headset is plugged in
+ * or removed) or the device stops delivering audio, the microphone is reopened on the current default so the recording
+ * does not go silent. After about 10 s without a working device the plugin is told the microphone is lost.
+ */
+static DWORD WINAPI capture_thread(LPVOID unused) {
+  (void)unused;
+  double last_audio = now_ms(), last_check = now_ms();
+  int failures = 0, lost = 0;
+  while (!stopping) {
+    WaitForSingleObject(wake, 200);
+    EnterCriticalSection(&device_lock);
+    if (device_open) for (int i = 0; i < BUFFERS; i++) if (headers[i].dwFlags & WHDR_DONE) {
+      if (headers[i].dwBytesRecorded) { consume(buffers[i], headers[i].dwBytesRecorded / 2); last_audio = now_ms(); }
+      headers[i].dwFlags &= ~WHDR_DONE; headers[i].dwBytesRecorded = 0;
+      if (!stopping) waveInAddBuffer(device, &headers[i], sizeof(WAVEHDR));
+    }
+    double t = now_ms();
+    if (!stopping && t - last_check >= 1000) {
+      last_check = t;
+      if (!device_open || preferred_device() != opened_on || t - last_audio > 3000) {
+        close_microphone();
+        if (open_microphone()) { failures = 0; lost = 0; last_audio = now_ms(); emit("{\"event\":\"device_changed\"}"); }
+        else if (++failures >= 10 && !lost) { lost = 1; emit("{\"event\":\"error\",\"message\":\"microphone_lost\"}"); }
+      }
+    }
+    LeaveCriticalSection(&device_lock);
+  }
+  return 0;
 }
 #endif
 
@@ -171,12 +232,14 @@ int main(int argc, char **argv) {
   if (!wargv || wargc < 3) { fputs("usage: meeting-recorder <dir> <seconds> [--simulate file speed]\n", stderr); return 2; }
   wcsncpy(out_dir, wargv[1], 4095);
   double seconds = _wtof(wargv[2]);
+  for (int i = 3; i < wargc; i++) if (!wcscmp(wargv[i], L"--stream-pcm")) stream_pcm = 1;
   int simulate = wargc >= 5 && !wcscmp(wargv[3], L"--simulate");
   char sim_path[4096] = ""; if (simulate) { WideCharToMultiByte(CP_ACP, 0, wargv[4], -1, sim_path, sizeof sim_path, NULL, NULL); sim_speed = wargc >= 6 ? _wtof(wargv[5]) : 1; }
 #else
   if (argc < 3) { fputs("usage: meeting-recorder <dir> <seconds> [--simulate file speed]\n", stderr); return 2; }
   strncpy(out_dir, argv[1], 4095);
   double seconds = atof(argv[2]);
+  for (int i = 3; i < argc; i++) if (!strcmp(argv[i], "--stream-pcm")) stream_pcm = 1;
   int simulate = argc >= 5 && !strcmp(argv[3], "--simulate");
   const char *sim_path = simulate ? argv[4] : ""; if (simulate) sim_speed = argc >= 6 ? atof(argv[5]) : 1;
 #endif
@@ -192,6 +255,7 @@ int main(int argc, char **argv) {
 #endif
   } else {
 #ifdef _WIN32
+    InitializeCriticalSection(&device_lock);
     if (!open_microphone()) { emit("{\"event\":\"error\",\"message\":\"microphone_permission_or_device\"}"); return 1; }
     CreateThread(NULL, 0, capture_thread, NULL, 0, NULL);
 #else
@@ -201,13 +265,13 @@ int main(int argc, char **argv) {
   emit("{\"event\":\"ready\"}");
   read_commands();
 #ifdef _WIN32
-  if (!simulate) { waveInStop(device); waveInReset(device); sleep_ms(250); }
+  if (!simulate) { sleep_ms(250); EnterCriticalSection(&device_lock); if (device_open) { waveInStop(device); waveInReset(device); } LeaveCriticalSection(&device_lock); }
 #endif
   sleep_ms(150);
-  lock_on(&state_lock); flush(0); finished = 1; lock_off(&state_lock);
+  lock_on(&state_lock); emit_pcm(); flush(0); finished = 1; lock_off(&state_lock);
   emit("{\"event\":\"stopped\"}");
 #ifdef _WIN32
-  if (!simulate) waveInClose(device);
+  if (!simulate) { EnterCriticalSection(&device_lock); close_microphone(); LeaveCriticalSection(&device_lock); }
 #endif
   return 0;
 }
