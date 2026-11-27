@@ -5,15 +5,15 @@ import { constants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { REWRITE_BATCH, acceptRewrite, rewriteSegments } from "./rewrite";
-import { asrChoicesFor, type AiTask, BOARD_FORMS, DEFAULT_SETTINGS, SCENARIO_LIMIT, SCENARIO_TEXT_LIMIT, type Scenario, DEFAULT_TOPIC, FORM_LABEL, markdown, type BoardForm, type BoardSpace, type Settings, type Meeting, type Snapshot, type Environment, type Segment, type VoiceUtterance, type SpeakerChange, type LiveCaption } from "../shared";
+import { asrChoicesFor, type AiTask, BOARD_FORMS, DEFAULT_SETTINGS, SCENARIO_LIMIT, SCENARIO_TEXT_LIMIT, type Scenario, DEFAULT_TOPIC, FORM_LABEL, markdown, type BoardForm, type BoardSpace, type MeetingDisplayMode, type Settings, type Meeting, type Snapshot, type Environment, type Segment, type VoiceUtterance, type SpeakerChange, type LiveCaption } from "../shared";
 import { RETRY_PROMPT, VAD, asrConfig, asrPrompt, polishTranscript, stripPromptEcho, vocabularyTerms } from "./asr";
 import { LivePreview } from "./live-preview";
 import * as OpenCC from "opencc-js";
 import { ModelStore, WINDOWS_DEFAULTS, type SetupState } from "./models";
 import { DEFAULT_ASSISTANT, detectTasks, mentionsAssistant, quickTasks, taskMessage, type Assistant } from "./tasks";
-import { generateMinutes } from "./minutes";
+import { generateMinutes, validateMinutesEvidence } from "./minutes";
 import { planTodo, prepareTodos, rewritePrep, todosFromMinutes } from "./prep";
-import { minutesDocument, minutesMeta } from "../minutes-format";
+import { minutesCitationTimes, minutesDocument, minutesMeta, stripMinutesCitations } from "../minutes-format";
 import { applyRound, itemsFromNotes, meaningfulLength, mergePlan, notesFromItems, summarize, type Generate } from "./summary";
 
 /** Listen before drawing: the first judgement waits for this much meaningful speech; after five minutes a form is chosen regardless. */
@@ -42,6 +42,8 @@ type Stored = Meeting & { asrModel: string; audioFiles: Record<string, string>; 
 export type Recorder = { write: (command: string) => void; kill: () => void };
 export type Deps = {
   data: string; temp: string; recorderPath: string; generate: Generate;
+  /** Preferred initial display for newly created meetings. Historic records default to board. */
+  defaultDisplayMode?: MeetingDisplayMode;
   /** voxtype shipped inside the plugin; used unless the person points to another one. */
   voxtypePath?: string;
   /** Windows: bundled whisper-cli builds, fastest first; a build the processor cannot run is skipped. */
@@ -221,6 +223,7 @@ export class MeetingController {
         for (const segment of record.segments) if (segment.status === "done") segment.text = stripPromptEcho(segment.text, this.echoPrompts());
         for (const segment of record.segments) if (segment.status === "done" && (!segment.text || isNoiseTranscript(segment.text))) { segment.status = "empty"; segment.text = ""; }
         record.summaryState = "idle";
+        record.displayMode = record.displayMode === "live-map" ? "live-map" : "board";
         record.asrModel ||= "large-v3-turbo";
         record.notes = Array.isArray(record.notes) ? record.notes.map(note => ({ ...note, topic: note.topic || DEFAULT_TOPIC })) : [];
         // Older meetings: segments gain the chatter tag, plans a centre, and organised notes become board entries in the same groups.
@@ -310,6 +313,19 @@ export class MeetingController {
     if (!record) throw Error("未找到此会议，请从当前会话重新打开");
     return this.snapshot(record);
   }
+  async setDisplayMode(id: string, mode: unknown): Promise<Snapshot> {
+    if (mode !== "live-map" && mode !== "board") throw Error("不支持的白板显示模式");
+    return this.exclusive(async () => {
+      const record = this.records.get(id);
+      if (!record) throw Error("未找到会议");
+      const previous = record.displayMode;
+      record.displayMode = mode;
+      try { await this.persist(record); }
+      catch (error) { record.displayMode = previous; throw error; }
+      this.emit();
+      return this.snapshot(record);
+    });
+  }
   private emit() { if (!this.disposed) this.deps.emit(this.snapshot()); }
   private liveChanged() {
     if (this.liveTimer || this.disposed) return;
@@ -361,6 +377,10 @@ export class MeetingController {
       // Settings can change any time: recognition options apply from the next meeting, cleanup, script and organising at once.
       const before = this.settings.asrModel;
       this.settings = this.normalizeSettings(value);
+      // Switching to local must immediately stop sending microphone frames to a configured remote stream.
+      if (this.settings.asrEngine === "local" && this.voice?.stream && this.deps.openVoiceStream && !(this.voice.stream instanceof LivePreview)) {
+        this.voice.stream.abort(); this.voice = null;
+      }
       await writeFile(path.join(this.deps.data, "settings.json"), JSON.stringify(this.settings), { mode: 0o600 });
       if (this.settings.asrModel !== before) this.prepare(); // fetch a newly chosen model right away
       this.emit(); return this.snapshot();
@@ -420,7 +440,7 @@ export class MeetingController {
       const model = await this.models.preferred(this.settings.asrModel);
       this.configFor = ""; // written once the model is on disk, see drain()
       if (this.models.state.status === "failed") this.prepare();
-      this.current = { id, title: title.trim().slice(0, 200) || "会议 " + new Date().toLocaleString(), startedAt: Date.now(), endedAt: null, phase: "starting", segments: [], notes: [], summaryThrough: -1, summaryAt: null, summaryState: "idle", summaryError: null, error: null, plan: null, items: [], links: [], summaries: [], lastChange: null, requestedForm: null, chapters: null, nextMeetingId: null, aiTasks: [], aiSessionId: null, chatSessionId: origin?.chatSessionId ?? null, minutes: null, preps: null, todoDone: [], redraw: null, workspaceId: origin?.workspaceId ?? null, audioFiles: {}, sessionDir, asrModel: model };
+      this.current = { id, title: title.trim().slice(0, 200) || "会议 " + new Date().toLocaleString(), startedAt: Date.now(), endedAt: null, displayMode: this.deps.defaultDisplayMode ?? "board", phase: "starting", segments: [], notes: [], summaryThrough: -1, summaryAt: null, summaryState: "idle", summaryError: null, error: null, plan: null, items: [], links: [], summaries: [], lastChange: null, requestedForm: null, chapters: null, nextMeetingId: null, aiTasks: [], aiSessionId: null, chatSessionId: origin?.chatSessionId ?? null, minutes: null, preps: null, todoDone: [], redraw: null, workspaceId: origin?.workspaceId ?? null, audioFiles: {}, sessionDir, asrModel: model };
       this.records.set(id, this.current); this.level = null; this.recorderReady = false;
       await this.persist(); this.emit();
       this.startTimeout = setTimeout(() => {
@@ -446,7 +466,7 @@ export class MeetingController {
       const event = (value: Record<string, unknown>) => {
         if (value.event === "pcm") {
           if (this.disposed || this.current?.id !== id || typeof value.hex !== "string" || !/^(?:[a-f0-9]{4}){1,3200}$/.test(value.hex)) return;
-          if (openVoice && !voiceStarted) {
+          if (openVoice && !voiceStarted && (!streamVoice || this.settings.asrEngine === "cloud")) {
             voiceStarted = true;
             try {
               this.voice = { id, stream: openVoice(change => {
@@ -735,13 +755,14 @@ export class MeetingController {
     if (meaningfulLength(done) < MINUTES_MIN_CHARS) throw Error("转写内容太少（有效内容不到 " + MINUTES_MIN_CHARS + " 字），暂不生成纪要");
     if (this.minutesRunning.has(id)) return this.snapshot(record);
     this.minutesRunning.add(id);
-    const through = done[done.length - 1].seq;
     record.minutes = { markdown: record.minutes?.markdown ?? null, at: record.minutes?.at ?? null, through: record.minutes?.through ?? -1, model: record.minutes?.model ?? null, state: "working", error: null };
     void this.persist(record).catch(() => undefined); this.emit();
     void (async () => {
       try {
         if (record.segments.some(segment => segment.rewrite === "pending")) { await this.proofreadIdle(record); if (this.disposed) return; }
-        const result = await generateMinutes(this.publicMeeting(record), this.deps.generate, this.settings.model, this.deps.organiseTimeoutMs ?? 60000);
+        const segments = record.segments.filter(segment => segment.status === "done" && segment.text.trim());
+        const through = segments.at(-1)?.seq ?? -1;
+        const result = await generateMinutes({ segments }, this.deps.generate, this.settings.model, this.deps.organiseTimeoutMs ?? 60000);
         if (this.disposed) return;
         record.minutes = { markdown: result.markdown, at: Date.now(), through, model: result.model, state: "idle", error: null };
         this.deps.log("minutes_completed", { count: result.parts, success: true });
@@ -868,10 +889,10 @@ export class MeetingController {
   async saveMinutes(id: string, markdown: string, model: string | null = null): Promise<{ path: string }> {
     const record = this.records.get(id);
     if (!record) throw Error("未找到会议");
-    const text = markdown.trim();
+    const text = validateMinutesEvidence(markdown.slice(0, 200000), record).trim();
     if (!text) throw Error("纪要内容为空");
     const done = record.segments.filter(segment => segment.status === "done" && segment.text.trim());
-    record.minutes = { markdown: text.slice(0, 200000), at: Date.now(), through: done.at(-1)?.seq ?? -1, model, state: "idle", error: null };
+    record.minutes = { markdown: text, at: Date.now(), through: done.at(-1)?.seq ?? -1, model, state: "idle", error: null };
     await this.persist(record); this.emit();
     return this.exportHtml(id);
   }
@@ -880,7 +901,7 @@ export class MeetingController {
     const record = this.records.get(id);
     if (!record?.minutes?.markdown) throw Error("这场会议还没有会议纪要，请先生成");
     const directory = path.join(this.deps.data, "exports"); await mkdir(directory, { recursive: true, mode: 0o700 });
-    const file = path.join(directory, record.id + "-纪要.html"); await writeFile(file, minutesDocument(record.minutes.markdown, record.title, minutesMeta(record.startedAt, record.endedAt)), { mode: 0o600 });
+    const file = path.join(directory, record.id + "-纪要.html"); await writeFile(file, minutesDocument(record.minutes.markdown, record.title, minutesMeta(record.startedAt, record.endedAt), minutesCitationTimes(record.segments)), { mode: 0o600 });
     return { path: file };
   }
   /** Minutes as an HTML file named after the meeting, put on the clipboard as a file to paste into a chat. */
@@ -890,13 +911,13 @@ export class MeetingController {
     // One folder per meeting keeps meetings with the same title apart while the file keeps the readable name.
     const directory = path.join(this.deps.data, "exports", "share", record.id); await mkdir(directory, { recursive: true, mode: 0o700 });
     const name = shareName(record.title);
-    const file = path.join(directory, name); await writeFile(file, minutesDocument(record.minutes.markdown, record.title, minutesMeta(record.startedAt, record.endedAt)), { mode: 0o600 });
+    const file = path.join(directory, name); await writeFile(file, minutesDocument(record.minutes.markdown, record.title, minutesMeta(record.startedAt, record.endedAt), minutesCitationTimes(record.segments)), { mode: 0o600 });
     const copied = await copyFileToClipboard(file);
     this.deps.log("minutes_shared", { success: copied });
     return { path: file, name, copied };
   }
   private taskRunner: Promise<void> | null = null;
-  /** Looks at the newest speech for requests to AI 助手 and the person's scenarios, and queues them; one detection at a time per meeting. */
+  /** Looks at the newest speech for requests to the assistant and the person's scenarios, and queues them; one detection at a time per meeting. */
   private detecting = new Set<string>();
   /** A detection asked for while one was running runs again afterwards, so the latest speech is not left unchecked. */
   private detectAgain = new Set<string>();
@@ -1135,7 +1156,7 @@ export class MeetingController {
   async export(id?: string): Promise<{ path: string; text: string }> {
     const record = id ? this.records.get(id) : this.current;
     if (!record) throw Error("请先选择会议");
-    const text = (record.minutes?.markdown ? record.minutes.markdown + "\n\n---\n\n" : "") + markdown(record);
+    const text = (record.minutes?.markdown ? stripMinutesCitations(record.minutes.markdown) + "\n\n---\n\n" : "") + markdown(record);
     const directory = path.join(this.deps.data, "exports"); await mkdir(directory, { recursive: true, mode: 0o700 });
     const file = path.join(directory, record.id + ".md"); await writeFile(file, text, { mode: 0o600 });
     return { path: file, text };

@@ -1,6 +1,6 @@
 {
   "name": "meeting-assistant-mcp",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Meeting recording, live transcription, self-organising board and minutes as an MCP server for Codex, Claude Code, Cursor and other agents.",
   "private": true,
   "license": "MIT",
@@ -17,8 +17,10 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "@types/ws": "8.18.2",
     "esbuild": "0.25.12",
     "opencc-js": "^1.4.2",
-    "typescript": "~5.8.3"
+    "typescript": "~5.8.3",
+    "ws": "8.23.0"
   }
 }

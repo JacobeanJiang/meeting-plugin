@@ -68,6 +68,16 @@ export class MeetingBrowser {
           // A new meeting or another record: the page navigates to that meeting's own address.
           if (body.action === "new") { const meeting = this.controller.view(meetingId).meeting!; const { snapshot } = await this.controller.newMeeting(String((body as { title?: unknown }).title ?? "").slice(0, 200), { workspaceId: meeting.workspaceId, chatSessionId: meeting.chatSessionId }); response.end(JSON.stringify({ ok: true, url: await this.open(snapshot.meeting!.id) })); return; }
           if (body.action === "switch") { const id = String((body as { id?: unknown }).id ?? ""); await this.controller.switchTo(id); response.end(JSON.stringify({ ok: true, url: await this.open(id) })); return; }
+          if (body.action === "displayMode") {
+            try {
+              const snapshot = await this.controller.setDisplayMode(meetingId, (body as { mode?: unknown }).mode);
+              response.end(JSON.stringify({ ok: true, mode: snapshot.meeting!.displayMode }));
+            } catch (error) {
+              response.writeHead(400);
+              response.end(JSON.stringify({ error: error instanceof Error ? error.message : "切换白板显示模式失败" }));
+            }
+            return;
+          }
           // Minutes can be written for any meeting this page shows, including past ones.
           if (body.action === "minutes") {
             try { this.controller.requestMinutes(meetingId); response.end(JSON.stringify({ ok: true })); }

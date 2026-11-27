@@ -1,3 +1,5 @@
+import { stamp, type Segment } from "./shared";
+
 /**
  * Meeting minutes: parse the Markdown produced with the minutes prompt into sections, and render them as
  * escaped HTML. The model never writes HTML; every character it produces is escaped, and only the
@@ -45,6 +47,47 @@ export function parseMinutes(markdown: string): MinutesDoc {
   return doc;
 }
 
+const CITATION_SUFFIX = /(?:[ \t]+\[\[字幕:s\d+\]\])+[ \t]*\r?$/;
+
+export function stripMinutesCitations(markdown: string): string {
+  return markdown.split("\n").map(line => line.replace(CITATION_SUFFIX, "")).join("\n");
+}
+
+export function todosFromMinutes(markdown: string | null | undefined): string[] {
+  if (!markdown) return [];
+  const lines = stripMinutesCitations(markdown).split("\n");
+  const start = lines.findIndex(line => /^#{1,3}\s*待办/.test(line.trim()));
+  if (start < 0) return [];
+  const out: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^#{1,3}\s/.test(line.trim())) break;
+    const item = line.trim().match(/^(?:[-*+]|\d+[.、)])\s+(.+)$/);
+    if (item) out.push(item[1].trim());
+  }
+  return out;
+}
+
+export function minutesCitationTimes(segments: Segment[]): Map<string, number> {
+  return new Map(segments.filter(segment => segment.status === "done" && segment.text.trim() && Number.isFinite(segment.startMs))
+    .map(segment => [segment.id, segment.startMs]));
+}
+
+function cite(text: string, render: (text: string) => string, times?: ReadonlyMap<string, number>, interactive = true): string {
+  const suffix = text.match(CITATION_SUFFIX);
+  if (!suffix) return render(text);
+  let html = render(text.slice(0, suffix.index));
+  const ids = new Set(Array.from(suffix[0].matchAll(/\[\[字幕:(s\d+)\]\]/g), match => match[1]));
+  for (const id of ids) {
+    const ms = times?.get(id);
+    if (ms === undefined || !Number.isFinite(ms)) continue;
+    const time = stamp(ms);
+    html += interactive
+      ? ` <button type="button" class="xj-mtg-minutes-citation" data-citation="${id}" aria-label="跳到 ${time} 的字幕">${time}</button>`
+      : ` <span class="xj-mtg-minutes-citation">${time}</span>`;
+  }
+  return html;
+}
+
 const ESCAPE: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
 export const escapeHtml = (value: string) => value.replace(/[&<>"']/g, char => ESCAPE[char]);
 /** Inline marks the prompt asks for: bold, 【object/topic】 tags, @people. Applied after escaping. */
@@ -77,14 +120,15 @@ export function parseDecision(text: string): Decision {
   return { tag: tag?.[1] ?? null, title: split ? split[1] : null, body: split ? split[2].trim() : rest };
 }
 type Li = Extract<MinutesBlock, { type: "li" }>;
-function blocksHtml(blocks: MinutesBlock[], render: (block: Li) => string): string {
+type Cite = (text: string, render: (text: string) => string) => string;
+function blocksHtml(blocks: MinutesBlock[], withCitation: Cite, render: (text: string) => string): string {
   let html = "", list: "ul" | "ol" | null = null;
   const close = () => { if (list) { html += "</" + list + ">"; list = null; } };
   for (const block of blocks) {
-    if (block.type === "li") { if (list !== "ul") { close(); html += "<ul>"; list = "ul"; } html += "<li class=\"m-d" + block.depth + "\">" + render(block) + "</li>"; continue; }
-    if (block.type === "ol") { if (list !== "ol") { close(); html += "<ol>"; list = "ol"; } html += "<li>" + inline(block.text) + "</li>"; continue; }
+    if (block.type === "li") { if (list !== "ul") { close(); html += "<ul>"; list = "ul"; } html += "<li class=\"m-d" + block.depth + "\">" + withCitation(block.text, render) + "</li>"; continue; }
+    if (block.type === "ol") { if (list !== "ol") { close(); html += "<ol>"; list = "ol"; } html += "<li>" + withCitation(block.text, inline) + "</li>"; continue; }
     close();
-    html += block.type === "p" ? "<p>" + inline(block.text) + "</p>" : "<" + block.type + ">" + inline(block.text) + "</" + block.type + ">";
+    html += block.type === "p" ? "<p>" + withCitation(block.text, inline) + "</p>" : "<" + block.type + ">" + withCitation(block.text, inline) + "</" + block.type + ">";
   }
   close();
   return html;
@@ -93,7 +137,7 @@ const NUMBERED = /^(?:[一二三四五六七八九十]+|\d+)[.、．]\s*/;
 const two = (n: number) => (n < 10 ? "0" : "") + n;
 const OVERVIEW_KEY = /^(?:\*\*)?([^：:*]{1,8})(?:\*\*)?[：:]\s*(.*)$/;
 /** Theme as the lead line, goals as a numbered list; anything else in the overview stays as written. */
-function overviewHtml(section: MinutesSection): string {
+function overviewHtml(section: MinutesSection, withCitation: Cite): string {
   let dek = "", inGoals = false; const goals: string[] = []; const rest: MinutesBlock[] = [];
   for (const block of section.blocks) {
     const key = block.type === "li" && block.depth === 0 ? block.text.match(OVERVIEW_KEY) : null;
@@ -104,12 +148,12 @@ function overviewHtml(section: MinutesSection): string {
     inGoals = false; rest.push(block);
   }
   return "<div class=\"m-overview\">"
-    + (dek ? "<p class=\"m-label\">主题</p><p class=\"m-dek\">" + inline(dek) + "</p>" : "")
-    + (goals.length ? "<p class=\"m-label\">核心目标</p><ol class=\"m-goals\">" + goals.map((goal, index) => "<li><span class=\"m-n\">" + two(index + 1) + "</span><span>" + inline(goal) + "</span></li>").join("") + "</ol>" : "")
-    + (rest.length ? blocksHtml(rest, block => keyed(block.text)) : "") + "</div>";
+    + (dek ? "<p class=\"m-label\">主题</p><p class=\"m-dek\">" + withCitation(dek, inline) + "</p>" : "")
+    + (goals.length ? "<p class=\"m-label\">核心目标</p><ol class=\"m-goals\">" + goals.map((goal, index) => "<li><span class=\"m-n\">" + two(index + 1) + "</span><span>" + withCitation(goal, inline) + "</span></li>").join("") + "</ol>" : "")
+    + (rest.length ? blocksHtml(rest, withCitation, keyed) : "") + "</div>";
 }
 /** Each top-level direction becomes a chapter: its own number, then sub-topics with their points. */
-function directionsHtml(section: MinutesSection): string {
+function directionsHtml(section: MinutesSection, withCitation: Cite): string {
   const chapters: { title: string | null; blocks: MinutesBlock[] }[] = [];
   for (const block of section.blocks) {
     if (block.type === "h2") chapters.push({ title: block.text, blocks: [] });
@@ -118,28 +162,34 @@ function directionsHtml(section: MinutesSection): string {
   let number = 0;
   return "<div class=\"m-directions\">" + chapters.map(chapter => {
     let sub = 0; let body = ""; let points: Li[] = [];
-    const flush = () => { if (points.length) body += "<ul class=\"m-points\">" + points.map(point => "<li class=\"m-d" + point.depth + "\">" + keyed(point.text) + "</li>").join("") + "</ul>"; points = []; };
+    const flush = () => { if (points.length) body += "<ul class=\"m-points\">" + points.map(point => "<li class=\"m-d" + point.depth + "\">" + withCitation(point.text, keyed) + "</li>").join("") + "</ul>"; points = []; };
     for (const block of chapter.blocks) {
       if (block.type === "li") { points.push(block); continue; }
       flush();
-      if (block.type === "h3") body += "<h4 class=\"m-sub\"><span class=\"m-sub-n\">" + (++sub) + "</span>" + inline(block.text.replace(NUMBERED, "").replace(/^【(.+)】$/, "$1")) + "</h4>";
-      else body += blocksHtml([block], point => keyed(point.text));
+      if (block.type === "h3") body += "<h4 class=\"m-sub\"><span class=\"m-sub-n\">" + (++sub) + "</span>" + inline(stripMinutesCitations(block.text).replace(NUMBERED, "").replace(/^【(.+)】$/, "$1")) + "</h4>";
+      else body += blocksHtml([block], withCitation, keyed);
     }
     flush();
-    return "<article class=\"m-card\">" + (chapter.title ? "<header class=\"m-chapter\"><span class=\"m-num\">" + two(++number) + "</span><h3 class=\"m-card-title\">" + inline(chapter.title.replace(NUMBERED, "")) + "</h3></header>" : "") + body + "</article>";
+    return "<article class=\"m-card\">" + (chapter.title ? "<header class=\"m-chapter\"><span class=\"m-num\">" + two(++number) + "</span><h3 class=\"m-card-title\">" + inline(stripMinutesCitations(chapter.title).replace(NUMBERED, "")) + "</h3></header>" : "") + body + "</article>";
   }).join("") + "</div>";
 }
-function decisionsHtml(section: MinutesSection): string {
-  const items = section.blocks.filter((block): block is Li => block.type === "li").map(block => parseDecision(block.text));
+function decisionsHtml(section: MinutesSection, withCitation: Cite): string {
+  const items = section.blocks.filter((block): block is Li => block.type === "li");
   const other = section.blocks.filter(block => block.type !== "li");
-  return "<div class=\"m-decisions\">" + items.map(item => "<div class=\"m-decision\">" + (item.tag || item.title ? "<div class=\"m-decision-head\">" + (item.tag ? "<span class=\"m-tag\">" + escapeHtml(item.tag) + "</span>" : "") + (item.title ? "<b>" + inline(item.title) + "</b>" : "") + "</div>" : "") + "<p>" + inline(item.body) + "</p></div>").join("") + "</div>" + (other.length ? blocksHtml(other, block => keyed(block.text)) : "");
+  return "<div class=\"m-decisions\">" + items.map(block => {
+    const item = parseDecision(stripMinutesCitations(block.text));
+    return "<div class=\"m-decision\">" + (item.tag || item.title ? "<div class=\"m-decision-head\">" + (item.tag ? "<span class=\"m-tag\">" + escapeHtml(item.tag) + "</span>" : "") + (item.title ? "<b>" + inline(item.title) + "</b>" : "") + "</div>" : "") + "<p>" + withCitation(block.text, () => inline(item.body)) + "</p></div>";
+  }).join("") + "</div>" + (other.length ? blocksHtml(other, withCitation, keyed) : "");
 }
-function todosHtml(section: MinutesSection): string {
-  const items = section.blocks.filter((block): block is Li => block.type === "li").map(block => parseTodo(block.text));
+function todosHtml(section: MinutesSection, withCitation: Cite): string {
+  const items = section.blocks.filter((block): block is Li => block.type === "li");
   const other = section.blocks.filter(block => block.type !== "li");
-  return "<ul class=\"m-todos\">" + items.map(item => "<li><span class=\"m-check\" aria-hidden=\"true\"></span><div class=\"m-todo-main\"><p>" + (item.tag ? "<span class=\"m-tag\">" + escapeHtml(item.tag) + "</span>" : "") + inline(item.task) + "</p>"
+  return "<ul class=\"m-todos\">" + items.map(block => {
+    const item = parseTodo(stripMinutesCitations(block.text));
+    return "<li><span class=\"m-check\" aria-hidden=\"true\"></span><div class=\"m-todo-main\"><p>" + (item.tag ? "<span class=\"m-tag\">" + escapeHtml(item.tag) + "</span>" : "") + withCitation(block.text, () => inline(item.task)) + "</p>"
     + (item.people.length || item.teams ? "<div class=\"m-meta\">" + item.people.map(name => "<span class=\"m-at\">@" + escapeHtml(name) + "</span>").join("") + (item.teams ? "<span class=\"m-team\">" + escapeHtml(item.teams) + "</span>" : "") + "</div>" : "") + "</div>"
-    + (item.due ? "<span class=\"m-due\">" + escapeHtml(item.due) + "</span>" : "") + "</li>").join("") + "</ul>" + (other.length ? blocksHtml(other, block => keyed(block.text)) : "");
+    + (item.due ? "<span class=\"m-due\">" + escapeHtml(item.due) + "</span>" : "") + "</li>";
+  }).join("") + "</ul>" + (other.length ? blocksHtml(other, withCitation, keyed) : "");
 }
 /** What the minutes contain, counted from the parsed document: shown under the title so the size of the meeting reads at a glance. */
 function statsHtml(doc: MinutesDoc): string {
@@ -152,12 +202,13 @@ const HEADING_SHORT: Record<MinutesSectionKind, string | null> = { overview: "�
  * Body HTML for the plugin page and for the exported file; class names are scoped under .xj-mtg-minutes.
  * meta: a plain line set by the plugin (date, length of the meeting); escaped like everything else.
  */
-export function renderMinutesHtml(doc: MinutesDoc, meta?: string): string {
+export function renderMinutesHtml(doc: MinutesDoc, meta?: string, times?: ReadonlyMap<string, number>, interactive = true): string {
+  const withCitation: Cite = (text, render) => cite(text, render, times, interactive);
   let html = "<header class=\"m-mast\"><p class=\"m-kicker\"><span class=\"m-seal\" aria-hidden=\"true\"></span>会议纪要" + (meta ? "<span class=\"m-meta-line\">" + escapeHtml(meta) + "</span>" : "") + "</p>"
-    + (doc.title ? "<h1 class=\"m-title\">" + inline(doc.title) + "</h1>" : "") + statsHtml(doc) + "</header>";
+    + (doc.title ? "<h1 class=\"m-title\">" + inline(stripMinutesCitations(doc.title)) + "</h1>" : "") + statsHtml(doc) + "</header>";
   for (const section of doc.sections) {
-    const body = section.kind === "overview" ? overviewHtml(section) : section.kind === "directions" ? directionsHtml(section) : section.kind === "decisions" ? decisionsHtml(section) : section.kind === "todos" ? todosHtml(section) : blocksHtml(section.blocks, block => keyed(block.text));
-    html += "<section class=\"m-section m-sec-" + section.kind + "\">" + (section.heading ? "<h2 class=\"m-heading\"><span>" + inline(HEADING_SHORT[section.kind] ?? section.heading) + "</span></h2>" : "") + body + "</section>";
+    const body = section.kind === "overview" ? overviewHtml(section, withCitation) : section.kind === "directions" ? directionsHtml(section, withCitation) : section.kind === "decisions" ? decisionsHtml(section, withCitation) : section.kind === "todos" ? todosHtml(section, withCitation) : blocksHtml(section.blocks, withCitation, keyed);
+    html += "<section class=\"m-section m-sec-" + section.kind + "\">" + (section.heading ? "<h2 class=\"m-heading\"><span>" + inline(stripMinutesCitations(HEADING_SHORT[section.kind] ?? section.heading)) + "</span></h2>" : "") + body + "</section>";
   }
   return html;
 }
@@ -171,6 +222,7 @@ export function renderMinutesHtml(doc: MinutesDoc, meta?: string): string {
 export const MINUTES_CSS = ".xj-mtg-minutes{--ink:#17161a;--ink-2:#3a3732;--muted:#8a857b;--line:rgba(23,22,26,.1);--hair:rgba(23,22,26,.06);--paper:#f6f4ef;--seal:#b8402a;--seal-soft:#f7ebe6;--ok:#2f6b4f;--ok-soft:#ecf4ef;"
   + "--serif:\"Songti SC\",\"STSong\",\"Source Han Serif SC\",\"Noto Serif CJK SC\",\"Noto Serif SC\",\"SimSun\",serif;--figure:\"Iowan Old Style\",\"Palatino Linotype\",Palatino,Georgia,serif;"
   + "color:var(--ink-2);font:14.5px/1.8 -apple-system,BlinkMacSystemFont,\"PingFang SC\",\"HarmonyOS Sans SC\",\"Microsoft YaHei\",sans-serif;container-type:inline-size;overflow-wrap:anywhere;max-width:820px;margin:0 auto;padding:4px 0 8px}"
+  + ".xj-mtg-minutes .xj-mtg-minutes-citation{display:inline-block;margin-inline-start:3px;padding:0 6px;border:1px solid var(--line);border-radius:6px;color:var(--muted);background:var(--paper);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}"
   + ".xj-mtg-minutes ::selection{background:var(--seal-soft);color:var(--ink)}"
   + ".xj-mtg-minutes .m-mast,.xj-mtg-minutes .m-section{animation:m-rise .55s cubic-bezier(.2,.7,.2,1) both}"
   + ".xj-mtg-minutes .m-section:nth-of-type(1){animation-delay:.06s}.xj-mtg-minutes .m-section:nth-of-type(2){animation-delay:.12s}.xj-mtg-minutes .m-section:nth-of-type(3){animation-delay:.18s}.xj-mtg-minutes .m-section:nth-of-type(n+4){animation-delay:.24s}"
@@ -222,12 +274,12 @@ export const MINUTES_CSS = ".xj-mtg-minutes{--ink:#17161a;--ink-2:#3a3732;--mute
   + "@container (max-width:520px){.xj-mtg-minutes .m-title{font-size:24px}.xj-mtg-minutes .m-dek{font-size:17px}.xj-mtg-minutes .m-num{font-size:24px}.xj-mtg-minutes .m-card-title{font-size:17px}.xj-mtg-minutes .m-points{padding-left:18px}.xj-mtg-minutes .m-points>li::before{left:-13px}.xj-mtg-minutes .m-todos>li{flex-wrap:wrap}.xj-mtg-minutes .m-due{margin-left:26px}}"
   + "@media print{.xj-mtg-minutes .m-mast,.xj-mtg-minutes .m-section{animation:none}.xj-mtg-minutes .m-card,.xj-mtg-minutes .m-decision,.xj-mtg-minutes .m-todos>li{break-inside:avoid}}";
 /** Standalone, responsive HTML file of the minutes: the same brief on a sheet of paper. */
-export function minutesDocument(markdown: string, heading: string, meta?: string): string {
+export function minutesDocument(markdown: string, heading: string, meta?: string, times?: ReadonlyMap<string, number>): string {
   const doc = parseMinutes(markdown);
-  return "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>" + escapeHtml(doc.title ?? heading) + "</title><style>"
+  return "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>" + escapeHtml(stripMinutesCitations(doc.title ?? heading)) + "</title><style>"
     + "body{margin:0;background:#ebe8e1 radial-gradient(1200px 500px at 50% -10%,#f6f4ef,transparent)}main{box-sizing:border-box;max-width:920px;margin:clamp(0px,4vw,48px) auto;padding:clamp(20px,5vw,56px) clamp(18px,5vw,50px);background:#fffdf9;border-radius:6px;box-shadow:0 1px 2px rgba(23,22,26,.06),0 18px 48px -24px rgba(23,22,26,.25)}"
     + "@media print{body{background:#fff}main{margin:0;box-shadow:none;max-width:none}}"
-    + MINUTES_CSS + "</style></head><body><main><div class=\"xj-mtg-minutes\">" + renderMinutesHtml(doc, meta) + "</div></main></body></html>";
+    + MINUTES_CSS + "</style></head><body><main><div class=\"xj-mtg-minutes\">" + renderMinutesHtml(doc, meta, times, false) + "</div></main></body></html>";
 }
 /** "11月19日 15:01 · 58 分钟": the line above the title, from the meeting record. */
 export function minutesMeta(startedAt: number, endedAt: number | null): string {

@@ -16,6 +16,7 @@ if (await access(output).then(() => true, () => false)) throw Error(output + ' a
 await mkdir(output, { recursive: true });
 const sha256 = async file => createHash('sha256').update(await readFile(file)).digest('hex');
 await build({ absWorkingDir: root, entryPoints: ['src/mcp/server.ts'], outfile: path.join(output, 'server/index.mjs'), bundle: true, format: 'esm', platform: 'node', target: 'node22', legalComments: 'none',
+  banner: { js: "import { createRequire as meetingCreateRequire } from 'node:module'; const require = meetingCreateRequire(import.meta.url);" },
   plugins: [{ name: 'meeting-vendor', setup(b) { b.onResolve({ filter: /vendor\/open-artifact\.mjs$/ }, () => ({ path: '../vendor/open-artifact.mjs', external: true })); } }] });
 await mkdir(path.join(output, 'native'));
 let natives;
@@ -54,6 +55,10 @@ const boardEditor = path.join(output, 'vendor/assets/editors/whiteboard/index.ht
 await writeFile(boardEditor, signalBoardReady(await readFile(boardEditor, 'utf8')));
 await cp(path.join(root, 'web'), path.join(output, 'web'), { recursive: true });
 await cp(path.join(root, 'skills/meeting-assistant'), path.join(output, 'skills/meeting-assistant'), { recursive: true });
+await mkdir(path.join(output, 'docs'), { recursive: true });
+await copyFile(path.join(root, 'docs/voice-stream.md'), path.join(output, 'docs/voice-stream.md'));
+await mkdir(path.join(output, 'licenses/ws'), { recursive: true });
+await copyFile(path.join(root, 'node_modules/ws/LICENSE'), path.join(output, 'licenses/ws/LICENSE'));
 const docs = root;
 for (const name of ['README.md', 'NOTICE.md']) await copyFile(path.join(await access(path.join(docs, name)).then(() => docs, () => root), name), path.join(output, name));
 await mkdir(path.join(output, 'licenses/opencc-js'), { recursive: true });

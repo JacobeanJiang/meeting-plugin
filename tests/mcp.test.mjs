@@ -16,6 +16,7 @@ async function start(env = {}) {
   const models = path.join(home, 'xdg/voxtype/models'); await mkdir(models, { recursive: true });
   for (const [name, size] of [['ggml-large-v3-turbo-q5_0.bin', 574041195], ['ggml-silero-vad.bin', 885098]]) { const h = await open(path.join(models, name), 'w'); await h.truncate(size); await h.close(); }
   const record = { id, title: '接口排期评审', startedAt: Date.now() - 120000, endedAt: Date.now(), phase: 'complete', notes: [], summaryThrough: -1, summaryAt: null, summaryState: 'idle', summaryError: null, error: null, audioFiles: {}, sessionDir: path.join(data, 'audio', id),
+    speakerChanges: [{ atMs: 16000, name: '发言人 A' }],
     segments: [seg(0, '我们先对齐接口排期，首页搜索框放在第一期。'), seg(1, '推荐位的数据还没准备好，所以放到第二期。'), seg(2, '小王周五前出交互稿，埋点口径下周一和数据组对齐。'), seg(3, '测试资源下周一确认，如果推荐位数据延期，第二期整体顺延一周，产品这边负责同步给运营。')] };
   await writeFile(path.join(data, 'sessions', id + '.json'), JSON.stringify(record));
   const session = connect(home, env);
@@ -23,7 +24,7 @@ async function start(env = {}) {
 }
 /** One agent session: its own server process on the given data folder, as an agent app starts one per conversation. */
 function connect(home, env = {}) {
-  const child = spawn(process.execPath, [server], { env: { ...process.env, MEETING_ASSISTANT_HOME: home, XDG_DATA_HOME: path.join(home, 'xdg'), MEETING_OPEN_BROWSER: '0', MEETING_LLM_API_KEY: '', OPENAI_API_KEY: '', MEETING_LLM_BASE_URL: '', MEETING_ASR_MODEL: '', MEETING_ASR_BASE_URL: '', MEETING_ASR_API_KEY: '', MEETING_TASK_RUNNER: 'off', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [server], { env: { ...process.env, MEETING_ASSISTANT_HOME: home, XDG_DATA_HOME: path.join(home, 'xdg'), MEETING_OPEN_BROWSER: '0', MEETING_LLM_API_KEY: '', OPENAI_API_KEY: '', MEETING_LLM_BASE_URL: '', MEETING_VOICE_STREAM_URL: '', MEETING_VOICE_STREAM_API_KEY: '', MEETING_ASR_MODEL: '', MEETING_ASR_BASE_URL: '', MEETING_ASR_API_KEY: '', MEETING_TASK_RUNNER: 'off', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
   const pending = new Map(); let next = 1; const stray = [];
   createInterface({ input: child.stdout }).on('line', line => { let message; try { message = JSON.parse(line); } catch { stray.push(line); return; } pending.get(message.id)?.(message); pending.delete(message.id); });
   const request = (method, params) => new Promise((resolve, reject) => { const n = next++; const timer = setTimeout(() => reject(Error('timeout ' + method)), 20000); pending.set(n, message => { clearTimeout(timer); resolve(message); }); child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: n, method, params }) + '\n'); });
@@ -44,13 +45,13 @@ test('an agent connects over stdio, lists the tools and reads, opens and exports
     const meetings = await t.call('meeting_list');
     assert.equal(meetings.value.current, id); assert.equal(meetings.value.meetings[0].title, '接口排期评审');
     const read = await t.call('meeting_read', { afterSeq: 0 });
-    assert.equal(read.value.phase, 'complete'); assert.deepEqual(read.value.transcript.map(s => s.id), ['s1', 's2', 's3']); assert.equal(read.value.minutes, null); assert.ok(read.value.revision);
+    assert.equal(read.value.phase, 'complete'); assert.equal(read.value.transcript[0].speakers[0].name, '发言人 A'); assert.deepEqual(read.value.transcript.map(s => s.id), ['s1', 's2', 's3']); assert.equal(read.value.minutes, null); assert.ok(read.value.revision);
     const waited = await t.call('meeting_wait_changes', { afterRevision: read.value.revision, waitMs: 600 });
     assert.equal(waited.value.changed, false);
     const opened = await t.call('meeting_open', { id });
     assert.equal(opened.value.openedInBrowser, false); assert.equal(opened.value.organisingModel, null);
     const html = await (await fetch(opened.value.url)).text();
-    assert.match(html, /<title>会议白板<\/title>/); assert.match(html, /<body data-live-map /); assert.match(html, /<body[^>]*class="no-ai /, 'background AI tasks are hidden');
+    assert.match(html, /<title>会议白板<\/title>/); assert.match(html, /<body[^>]*class="no-ai /, 'background AI tasks are hidden');
     const state = await (await fetch(new URL('api', opened.value.url))).json();
     assert.equal(state.snapshot.meeting.id, id); assert.equal(state.snapshot.settings.aiTasks, false); assert.equal(state.snapshot.settings.autoSummary, false, 'no organising model: live organising stays off');
     assert.match((await t.call('meeting_control', { action: 'jump' })).error, /pause、resume 或 stop/);
@@ -64,11 +65,19 @@ test('without an organising model the agent writes the minutes from the prompt a
   try {
     await t.request('initialize', { protocolVersion: '2025-06-18', capabilities: {} });
     const asked = await t.call('meeting_minutes');
-    assert.equal(asked.value.mode, 'agent'); assert.match(asked.value.prompt, /\[00:15\] 推荐位的数据还没准备好/); assert.doesNotMatch(asked.value.prompt, /\$\{contents\}/);
-    const saved = await t.call('meeting_save_minutes', { markdown: '# 会议纪要：接口排期评审\n# 会议概览\n- **主题**：接口排期\n\n# 待办事项\n- 【首页】出交互稿 @小王（周五前）' });
-    assert.match(await readFile(saved.value.html, 'utf8'), /class="m-at">@小王/);
+    assert.equal(asked.value.mode, 'agent');
+    assert.match(asked.value.prompt, /\[00:15\] \[s1\] 推荐位的数据还没准备好/);
+    assert.match(asked.value.prompt, /\[\[依据:s12\|原话摘录\]\]/);
+    assert.doesNotMatch(asked.value.prompt, /\$\{contents\}/);
+    const saved = await t.call('meeting_save_minutes', { markdown: '# 会议纪要：接口排期评审\n# 会议概览\n- **主题**：接口排期\n\n# 待办事项\n- 【首页】出交互稿 @小王（周五前） [[依据:s2|小王周五前出交互稿]] [[依据:s1|小王周五前出交互稿]] [[字幕:s3]]' });
+    const html = await readFile(saved.value.html, 'utf8');
+    assert.match(html, /class="m-at">@小王/);
+    assert.match(html, /<span class="xj-mtg-minutes-citation">00:30<\/span>/);
+    assert.doesNotMatch(html, /\[\[(?:依据|字幕):/);
     const again = await t.call('meeting_minutes');
     assert.equal(again.value.state, 'ready'); assert.equal(again.value.by, 'agent');
+    assert.match(again.value.markdown, /周五前） \[\[字幕:s2\]\]$/);
+    assert.doesNotMatch(again.value.markdown, /\[\[字幕:s[13]\]\]|\[\[依据:/);
     const exported = await t.call('meeting_export');
     assert.match(await readFile(exported.value.markdown, 'utf8'), /小王周五前出交互稿/); assert.ok(exported.value.html);
   } finally { await t.close(); }
@@ -80,7 +89,7 @@ test('with an OpenAI-compatible model configured, minutes are generated by the s
   const llm = http.createServer(async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk; const parsed = JSON.parse(body); requests.push({ auth: req.headers.authorization, model: parsed.model, path: req.url });
     const scope = parsed.messages[1].content.split('## 本次输出范围\n')[1] ?? '';
-    const text = scope.startsWith('本次只输出纪要骨架') ? '# 会议纪要：接口排期评审\n# 会议概览\n- **主题**：接口排期\n\n# 核心方向\n## 一.首页改版\n### 1.排期' : scope.includes('关键决策') ? '# 待办事项\n- 【首页】出交互稿 @小王（周五前）' : '- 排期：搜索框放第一期，推荐位放第二期';
+    const text = scope.startsWith('本次只输出纪要骨架') ? '# 会议纪要：接口排期评审\n# 会议概览\n- **主题**：接口排期\n\n# 核心方向\n## 一.首页改版\n### 1.排期' : scope.includes('关键决策') ? '# 待办事项\n- 【首页】出交互稿 @小王（周五前）' : '- 排期：搜索框放第一期，推荐位放第二期 [[依据:s0|首页搜索框放在第一期]] [[依据:s1|推荐位的数据还没准备好，所以放到第二期]]';
     res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ model: parsed.model, choices: [{ message: { content: text } }] }));
   });
   await new Promise(resolve => llm.listen(0, '127.0.0.1', resolve));
@@ -89,7 +98,7 @@ test('with an OpenAI-compatible model configured, minutes are generated by the s
     await t.request('initialize', { protocolVersion: '2025-06-18', capabilities: {} });
     const minutes = await t.call('meeting_minutes');
     assert.equal(minutes.error, null);
-    assert.equal(minutes.value.state, 'ready'); assert.match(minutes.value.markdown, /搜索框放第一期/); assert.equal(minutes.value.by, 'my-model');
+    assert.equal(minutes.value.state, 'ready'); assert.match(minutes.value.markdown, /搜索框放第一期，推荐位放第二期 \[\[字幕:s0\]\] \[\[字幕:s1\]\]/); assert.equal(minutes.value.by, 'my-model');
     assert.ok(requests.every(r => r.auth === 'Bearer test-key' && r.model === 'my-model' && r.path === '/v1/chat/completions'));
   } finally { await t.close(); llm.close(); }
 });
@@ -108,7 +117,7 @@ test('with an agent CLI installed, work asked for in the meeting is on; every ag
     const opened = await t.call('meeting_open', { id });
     assert.equal(opened.value.taskRunner, 'claude'); assert.equal(opened.value.assistantName, '小助'); assert.equal(opened.value.organisingModel, 'claude（本机命令行）');
     const html = await (await fetch(opened.value.url)).text();
-    assert.doesNotMatch(html, /<body[^>]*class="no-ai /); assert.doesNotMatch(html, /AI 助手/); assert.match(html, /会上说“小助，帮我……”/);
+    assert.doesNotMatch(html, /<body[^>]*class="no-ai /); assert.match(html, /会上说“小助，帮我……”/);
     const state = await (await fetch(new URL('api', opened.value.url))).json();
     assert.equal(state.snapshot.settings.aiTasks, true);
     assert.equal(state.snapshot.settings.autoSummary, true, 'the agent CLI organises the board: live organising is on without an API key');
@@ -152,6 +161,20 @@ test('cloud speech recognition is off unless a transcription model is configured
   } finally { await u.close(); }
 });
 
+
+test('a configured live provider appears in MCP and settings without exposing its key; disabling live captions disables its upload path', async () => {
+  for (const enabled of [true, false]) {
+    const t = await start({ MEETING_VOICE_STREAM_URL: 'ws://127.0.0.1:9/stream', MEETING_VOICE_STREAM_API_KEY: 'stream-test-key', MEETING_LIVE_CAPTIONS: enabled ? '1' : '0' });
+    try {
+      const { value } = await t.call('meeting_open', { id });
+      assert.match(value.speechRecognition, enabled ? /自定义流式/ : /本机识别/);
+      const settings = await (await fetch(new URL('api/settings', value.url))).json();
+      assert.equal(settings.environment.cloudAsr, enabled);
+      assert.equal(Boolean(settings.environment.voiceprintTest), enabled);
+      assert.ok(!JSON.stringify([value, settings]).includes('stream-test-key'));
+    } finally { await t.close(); }
+  }
+});
 
 test('a third-party recogniser and live captions can be set in <home>/config.json; the environment wins and a broken file is reported', async () => {
   const t = await start();

@@ -83,8 +83,11 @@ export const NO_CHAPTERS: Chapters = { active: null, closing: null, closed: [] }
 export type GroupSummary = { group: string; text: string; refs: string[]; updatedAt: number; previous: string | null };
 export type BoardLink = { id: string; from: string; to: string; type: LinkType; label: string | null };
 export type RoundChange = { at: number; added: number; revised: number; linked: number; rebuilt: boolean };
+export type MeetingDisplayMode = "live-map" | "board";
 export type Meeting = {
   id: string; title: string; startedAt: number; endedAt: number | null;
+  /** Older meetings default to the editable board. */
+  displayMode?: MeetingDisplayMode;
   phase: "starting" | "recording" | "paused" | "stopping" | "complete" | "interrupted";
   speakerChanges?: SpeakerChange[];
   segments: Segment[]; notes: Note[]; summaryThrough: number; summaryAt: number | null;

@@ -2,9 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 const load = async entry => { const b = await build({ entryPoints: [entry], bundle: true, write: false, platform: 'node', format: 'esm' }); return import('data:text/javascript;base64,' + Buffer.from(b.outputFiles[0].text).toString('base64')); };
-const { generateMinutes, TRANSCRIPT_LIMIT } = await load('src/server/minutes.ts');
+const { generateMinutes, referencedTranscriptLines, transcriptLines, validateMinutesEvidence, TRANSCRIPT_LIMIT } = await load('src/server/minutes.ts');
 const { MINUTES_PROMPT } = await load('src/server/minutes-prompt.ts');
-const { parseMinutes, renderMinutesHtml, parseTodo, parseDecision, minutesDocument } = await load('src/minutes-format.ts');
+const { parseMinutes, renderMinutesHtml, parseTodo, parseDecision, minutesDocument, minutesCitationTimes, stripMinutesCitations, todosFromMinutes } = await load('src/minutes-format.ts');
 export const SAMPLE = "# 会议纪要：S4版本资源排期评审\n# 会议概览\n- **主题**：S4版本资源与BUG修复排期\n- **核心目标**：\n1.对齐S4版本美术资源进度\n2.确认战斗模块BUG修复优先级\n\n# 核心方向\n- 按核心议题、业务逻辑和篇幅重心组织；可对适当重要信息加粗，数据严格依据原文提取，禁止虚构\n## 一.S4版本：资源进度同步\n### 1.美术资源交付\n- 交付进度：角色立绘交付率**90%**，场景资源剩余3张\n- 风险：特效资源依赖外包，交付时间**待确认**\n### 2.其他相关进展\n- 音效：主城BGM已完成混音\n## 二.战斗模块：BUG修复与数值平衡\n### 1.BUG修复排期\n- P0问题：技能连招卡顿需本周修复 <script>alert(1)</script>\n\n# 关键决策\n- 【S4版本】上线节奏：本轮只做主城与第一章，第二章延后\n- 【战斗模块】修复优先级：P0 问题优先于数值平衡\n\n# 待办事项\n- 【战斗模块】修复技能连招卡顿 @张三 @李四；协作方：开发、区域团队（下周三前）\n- 【S4版本】确认特效外包交付时间 @王五\n- 【跨项目协作】同步主城BGM至S3版本；协作方：音频组";
 const seg = (seq, text) => ({ id: 's' + seq, seq, startMs: seq * 15000, endMs: (seq + 1) * 15000, status: 'done', text, error: null, tag: null });
 
@@ -29,7 +29,7 @@ test('minutes are built in short requests: skeleton, one per sub-topic, then dec
     assert.equal(call.model, 'chosen');
     assert.ok(call.prompt.startsWith(before), 'prompt text before the placeholder unchanged');
     assert.ok(call.prompt.includes(after + '\n\n## 本次输出范围\n'), 'prompt text after the placeholder unchanged, then the part being asked for');
-    assert.match(call.prompt, /\[00:00\] 我们 S4 先做主城\n\[00:15\] 好的\n/); assert.doesNotMatch(call.prompt, /\[00:45\]/, 'failed and empty segments are left out');
+    assert.match(call.prompt, /\[00:00\] \[s0\] 我们 S4 先做主城\n\[00:15\] \[s1\] 好的\n/); assert.doesNotMatch(call.prompt, /\[00:45\]/, 'failed and empty segments are left out');
   }
   const md = result.markdown;
   assert.ok(md.startsWith('# 会议纪要：S4版本资源排期评审'), 'code fences removed');
@@ -37,6 +37,71 @@ test('minutes are built in short requests: skeleton, one per sub-topic, then dec
   assert.ok(md.indexOf('- 要点：1.BUG修复排期的内容') > md.indexOf('## 二.战斗模块'));
   assert.doesNotMatch(md, /不该出现的标题|好的\n/, 'stray headings and preambles are dropped');
   assert.ok(md.indexOf('# 关键决策') > md.indexOf('BUG修复排期的内容') && md.indexOf('# 待办事项') > md.indexOf('# 关键决策'));
+});
+test('minutes cite only completed segments with matching verbatim evidence', async () => {
+  const meeting = { segments: [
+    seg(0, '本轮只做主城，第二章延后'),
+    { ...seg(1, '张三周五前修复连招卡顿'), startMs: 0 },
+    { ...seg(2, '有风险需要跟进'), status: 'failed' },
+  ] };
+  assert.deepEqual(transcriptLines(meeting), ['[00:00] 本轮只做主城，第二章延后', '[00:00] 张三周五前修复连招卡顿']);
+  assert.deepEqual(referencedTranscriptLines(meeting), ['[00:00] [s0] 本轮只做主城，第二章延后', '[00:00] [s1] 张三周五前修复连招卡顿']);
+  const result = await generateMinutes(meeting, async input => {
+    const response = await fake([])(input);
+    const scope = scopeOf(input.prompt);
+    if (scope.startsWith('本次只输出纪要骨架')) {
+      response.text = response.text.replace('S4版本资源与BUG修复排期', 'S4版本范围 [[依据:s0|本轮只做主城]]');
+    } else if (scope.includes('“# 关键决策”这一个模块')) {
+      response.text += ' [[依据:s0|本轮只做主城]] [[依据:s0|第二章延后]] [[依据:s1|本轮只做主城]] [[依据:s42|本轮只做主城]]';
+    } else if (scope.includes('“# 待办事项”这一个模块')) {
+      response.text = '# 待办事项\n- 【战斗模块】修复连招卡顿 @张三（周五前） [[依据:s1|张三周五前修复连招卡顿]] [[字幕:s0]]';
+    } else {
+      response.text += ' [[依据:s2|有风险需要跟进]]';
+    }
+    return response;
+  }, null);
+  assert.match(result.markdown, /S4版本范围 \[\[字幕:s0\]\]/);
+  assert.match(result.markdown, /本轮只做主城 \[\[字幕:s0\]\]\n/);
+  assert.match(result.markdown, /修复连招卡顿 @张三（周五前） \[\[字幕:s1\]\]$/);
+  assert.equal((result.markdown.match(/\[\[字幕:/g) ?? []).length, 3);
+  assert.doesNotMatch(result.markdown, /\[\[依据/);
+  assert.equal(validateMinutesEvidence('- 无依据的观点 [[字幕:s0]]\n- 可定位的要点 [[依据:s0|第二章延后]]', meeting), '- 无依据的观点\n- 可定位的要点 [[字幕:s0]]');
+});
+test('verified citations locate the transcript in the meeting, export as times and preserve todo identities', () => {
+  const todo = '发送交付清单 @张三';
+  const markdown = '# 会议纪要：排期\n# 待办事项\n- ' + todo + ' [[字幕:s2]] [[字幕:s3]]';
+  const times = minutesCitationTimes([seg(2, '发送交付清单'), { ...seg(3, '无可用字幕'), status: 'failed' }]);
+  const page = renderMinutesHtml(parseMinutes(markdown), '会议', times);
+  assert.match(page, /data-citation="s2"[^>]*>00:30<\/button>/);
+  assert.doesNotMatch(page, /data-citation="s3"|\[\[字幕/);
+  const exported = minutesDocument(markdown, '排期', '', times);
+  assert.match(exported, /<span class="xj-mtg-minutes-citation">00:30<\/span>/);
+  assert.doesNotMatch(exported, /data-citation=|\[\[字幕/);
+  assert.deepEqual(todosFromMinutes(markdown), [todo]);
+  assert.ok(stripMinutesCitations(markdown).endsWith(todo));
+});
+test('long minutes preserve evidence verified within each condensed portion', async () => {
+  const segments = Array.from({ length: 200 }, (_, i) => seg(i, '第' + i + '段：讨论接口排期、测试资源和上线时间，小王负责联调，周五前给结论。'));
+  const tail = '最后决定九点上线，小王负责联调';
+  segments.push(seg(200, tail));
+  const calls = [];
+  const result = await generateMinutes({ segments }, async input => {
+    const scope = scopeOf(input.prompt);
+    if (!scope) {
+      if (input.prompt.includes('[s0]')) return { text: '- 联调 [[依据:s0|小王负责联调]] [[依据:s200|最后决定九点上线]]', model: 'm' };
+      if (input.prompt.includes('[s200]')) return { text: '- 九点上线 [[依据:s200|最后决定九点上线]]', model: 'm' };
+      return { text: '- 排期讨论', model: 'm' };
+    }
+    calls.push(input);
+    if (scope.includes('“# 关键决策”这一个模块')) {
+      return { text: '# 关键决策\n- 九点上线 [[依据:s200|最后决定九点上线]] [[依据:s0|周五前给结论]]', model: 'm' };
+    }
+    return fake([])(input);
+  }, null);
+  assert.match(calls[0].prompt, /- 联调 \[\[依据:s0\|小王负责联调\]\]\n/);
+  assert.equal(calls[0].prompt.split('[[依据:s200|最后决定九点上线]]').length, 2);
+  assert.match(result.markdown, /- 九点上线 \[\[字幕:s200\]\]\n/);
+  assert.doesNotMatch(result.markdown, /\[\[字幕:s0\]\]|\[\[依据/);
 });
 test('a failed request is retried once; a long meeting is condensed first and every request fits the model API', async () => {
   let failures = 1; const calls = [];
